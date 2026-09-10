@@ -32,7 +32,7 @@ PG_CONFIG = (
 # invocations. Persists between invocations within the same Lambda container.
 PG_CONN = None
 
-VALID_ROLES = ("EMPLOYEE", "MANAGER", "CEO")
+VALID_ROLES = ("EMPLOYEE", "MANAGER", "ADMIN")
 
 
 def get_connection():
@@ -60,6 +60,8 @@ def _ensure_schema(conn):
     with conn.cursor() as cur:
         cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS skills TEXT[] NOT NULL DEFAULT '{}'")
         cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS location TEXT")
+        cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager_notes TEXT")
+        cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS availability_status TEXT NOT NULL DEFAULT 'available'")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS change_requests (
@@ -109,7 +111,8 @@ def _execute(query, params=None, fetchone=False, fetchall=False):
 
 EMPLOYEE_FULL_COLUMNS = (
     "id, first_name, last_name, email, phone, job_title, department_id, "
-    "manager_id, bio, role, is_active, created_at, skills, location"
+    "manager_id, bio, role, is_active, created_at, skills, location, "
+    "manager_notes, availability_status"
 )
 
 
@@ -155,13 +158,23 @@ def list_employees_by_department(department_id):
     )
 
 
+def list_employees_by_manager_id(manager_id):
+    """Used to compute a manager's direct-reports list for org-structure display."""
+    return _execute(
+        f"SELECT {EMPLOYEE_FULL_COLUMNS} FROM employees WHERE manager_id = %s ORDER BY id",
+        (manager_id,),
+        fetchall=True,
+    )
+
+
 def create_employee(data, hashed_password):
     row = _execute(
         f"""
         INSERT INTO employees
             (first_name, last_name, email, phone, job_title, department_id,
-             manager_id, bio, hashed_password, role, is_active, skills, location)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             manager_id, bio, hashed_password, role, is_active, skills, location,
+             manager_notes, availability_status)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING {EMPLOYEE_FULL_COLUMNS}
         """,
         (
@@ -178,6 +191,8 @@ def create_employee(data, hashed_password):
             data.get("is_active", True),
             data.get("skills") or [],
             data.get("location"),
+            data.get("manager_notes"),
+            data.get("availability_status", "available"),
         ),
         fetchone=True,
     )

@@ -4,6 +4,7 @@ import { createTheme } from '@mui/material/styles'
 export const CITI_BLUE = '#056DAE'
 export const CITI_BLUE_DARK = '#045688'
 export const CITI_RED = '#EE3831'
+export const AVAILABLE_GREEN = '#1E8E3E'
 
 export const theme = createTheme({
   palette: {

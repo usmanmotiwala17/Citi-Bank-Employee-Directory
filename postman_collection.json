@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a5978a44-c26c-4d35-ba65-7a2c79fbe441",
     "name": "Employee Directory API",
-    "description": "Backend API for the Walmart-style Employee Directory service (backend/employee-service). Covers every route in function.py's ROUTES table, using the accounts and ids from seed_data.py.\n\nRoles: CEO (full access), MANAGER (scoped to own department), EMPLOYEE (own profile only). Log in via a request in the Auth folder first - it saves the token into the jwt_token collection variable that every other request authenticates with.\n\nMake sure the local server is running first: `python3 local_server.py` from backend/employee-service (listens on :8000 by default), against a Postgres database seeded with `python3 seed_data.py`.",
+    "description": "Backend API for the Walmart-style Employee Directory service (backend/employee-service). Covers every route in function.py's ROUTES table, using the accounts and ids from seed_data.py.\n\nRoles: ADMIN (full access), MANAGER (scoped to own department), EMPLOYEE (own profile only). Log in via a request in the Auth folder first - it saves the token into the jwt_token collection variable that every other request authenticates with.\n\nMake sure the local server is running first: `python3 local_server.py` from backend/employee-service (listens on :8000 by default), against a Postgres database seeded with `python3 seed_data.py`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -43,7 +43,7 @@
       "description": "Log in as each role tier. Each request saves its token into the jwt_token collection variable, which the whole collection's Bearer auth reads from - so run one of these before any Employees/Departments request to switch who you're acting as.",
       "item": [
         {
-          "name": "Login CEO",
+          "name": "Login Admin",
           "request": {
             "method": "POST",
             "header": [
@@ -62,10 +62,10 @@
                 "login"
               ]
             },
-            "description": "Logs in as Robert Chen (CEO). CEOs have full access to every employee and department, and are the only role that can create/delete employees or departments.",
+            "description": "Logs in as Robert Chen (Admin). Admins have full access to every employee and department, and are the only role that can create/delete employees or departments.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"robert.chen@acme.com\",\n  \"password\": \"ceopass123\"\n}",
+              "raw": "{\n  \"email\": \"robert.chen@acme.com\",\n  \"password\": \"adminpass123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -218,7 +218,7 @@
                 "employees"
               ]
             },
-            "description": "CEO gets all 18. Manager gets only their own department. Employee gets a one-item list containing just themselves."
+            "description": "Admin gets all 18. Manager gets only their own department. Employee gets a one-item list containing just themselves."
           },
           "response": []
         },
@@ -237,7 +237,7 @@
                 "7"
               ]
             },
-            "description": "Carol White is in Clothing (department_id 1). CEO can always view this; the Clothing manager (Sarah Johnson) can too, since it's her department; Carol herself can view it as her own profile."
+            "description": "Carol White is in Clothing (department_id 1). Admin can always view this; the Clothing manager (Sarah Johnson) can too, since it's her department; Carol herself can view it as her own profile."
           },
           "response": []
         },
@@ -256,12 +256,12 @@
                 "12"
               ]
             },
-            "description": "Angela Walker is in Grocery (department_id 2). CEO can view this fine. But if you're logged in as the Clothing manager (Sarah Johnson) or the Clothing employee (Carol White), this should come back 403 - neither of them has any visibility into Grocery."
+            "description": "Angela Walker is in Grocery (department_id 2). Admin can view this fine. But if you're logged in as the Clothing manager (Sarah Johnson) or the Clothing employee (Carol White), this should come back 403 - neither of them has any visibility into Grocery."
           },
           "response": []
         },
         {
-          "name": "Create Employee (CEO only)",
+          "name": "Create Employee (Admin only)",
           "request": {
             "method": "POST",
             "header": [
@@ -279,7 +279,7 @@
                 "employees"
               ]
             },
-            "description": "Only a CEO can create employees - a manager or employee token gets 403 here. This new hire is placed in Clothing (department_id 1) reporting to Sarah Johnson (manager_id 3, the Clothing manager) - manager_id must reference a MANAGER in the same department or the request is rejected with a 400. On success, the new id is saved into the new_employee_id collection variable for the Delete Employee request below. Note: re-running this a second time will fail with 'Email already in use', since Delete Employee only deactivates (soft-delete) rather than freeing up the email.",
+            "description": "Only an Admin can create employees - a manager or employee token gets 403 here. This new hire is placed in Clothing (department_id 1) reporting to Sarah Johnson (manager_id 3, the Clothing manager) - manager_id must reference a MANAGER in the same department or the request is rejected with a 400. On success, the new id is saved into the new_employee_id collection variable for the Delete Employee request below. Note: re-running this a second time will fail with 'Email already in use', since Delete Employee only deactivates (soft-delete) rather than freeing up the email.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"first_name\": \"New\",\n  \"last_name\": \"Hire\",\n  \"email\": \"new.hire@acme.com\",\n  \"password\": \"newhire123\",\n  \"role\": \"EMPLOYEE\",\n  \"department_id\": 1,\n  \"manager_id\": 3,\n  \"job_title\": \"Sales Associate\"\n}",
@@ -326,7 +326,7 @@
                 "7"
               ]
             },
-            "description": "A manager can edit job_title/is_active for anyone in their own department, and the CEO can edit anything. Try this as the Clothing manager (allowed) vs. as Carol White herself (rejected - self-service is limited to phone/bio only).",
+            "description": "A manager can edit job_title/is_active for anyone in their own department, and the Admin can edit anything. Try this as the Clothing manager (allowed) vs. as Carol White herself (rejected - self-service is limited to phone/bio only).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"job_title\": \"Senior Sales Associate\"\n}",
@@ -340,7 +340,7 @@
           "response": []
         },
         {
-          "name": "Update Employee - Reassign Department (CEO only)",
+          "name": "Update Employee - Reassign Department (Admin only)",
           "request": {
             "method": "PUT",
             "header": [
@@ -359,7 +359,7 @@
                 "7"
               ]
             },
-            "description": "Only the CEO can change department_id or manager_id. This moves Carol White from Clothing to Grocery - note department_id and manager_id have to be updated together here, because the new manager_id must belong to the new department (manager id 4 is Emily Davis, the Grocery manager). Submitting department_id alone without also updating manager_id would fail validation, since her old manager (Sarah Johnson, id 3) isn't the manager of Grocery.",
+            "description": "Only the Admin can change department_id or manager_id. This moves Carol White from Clothing to Grocery - note department_id and manager_id have to be updated together here, because the new manager_id must belong to the new department (manager id 4 is Emily Davis, the Grocery manager). Submitting department_id alone without also updating manager_id would fail validation, since her old manager (Sarah Johnson, id 3) isn't the manager of Grocery.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"department_id\": 2,\n  \"manager_id\": 4\n}",
@@ -387,12 +387,12 @@
                 "{{new_employee_id}}"
               ]
             },
-            "description": "Soft-deletes (is_active = false) the employee created by 'Create Employee' above - run that request first in this session so new_employee_id is populated. CEO can deactivate anyone; a manager can deactivate anyone in their own department."
+            "description": "Soft-deletes (is_active = false) the employee created by 'Create Employee' above - run that request first in this session so new_employee_id is populated. Admin can deactivate anyone; a manager can deactivate anyone in their own department."
           },
           "response": []
         },
         {
-          "name": "Directory Tree (CEO only)",
+          "name": "Directory Tree (Admin only)",
           "request": {
             "method": "GET",
             "header": [],
@@ -405,7 +405,7 @@
                 "directory-tree"
               ]
             },
-            "description": "Company-wide view: all CEOs, plus every department with its manager and employees. CEO-only - a manager or employee token gets 403 (they already get their own department's people from List Employees)."
+            "description": "Company-wide view: all Admins, plus every department with its manager and employees. Admin-only - a manager or employee token gets 403 (they already get their own department's people from List Employees)."
           },
           "response": []
         }
@@ -451,7 +451,7 @@
           "response": []
         },
         {
-          "name": "Create Department (CEO only)",
+          "name": "Create Department (Admin only)",
           "request": {
             "method": "POST",
             "header": [
@@ -469,7 +469,7 @@
                 "departments"
               ]
             },
-            "description": "CEO-only. On success, saves the new department's id into the new_department_id collection variable for the Delete Department request below.",
+            "description": "Admin-only. On success, saves the new department's id into the new_department_id collection variable for the Delete Department request below.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Toys\",\n  \"description\": \"Toys and games\"\n}",
@@ -516,7 +516,7 @@
                 "1"
               ]
             },
-            "description": "CEO-only. Updates the Clothing department's description.",
+            "description": "Admin-only. Updates the Clothing department's description.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"description\": \"Apparel, shoes, and accessories - updated via Postman demo\"\n}",
@@ -530,7 +530,7 @@
           "response": []
         },
         {
-          "name": "Delete Department (CEO only)",
+          "name": "Delete Department (Admin only)",
           "request": {
             "method": "DELETE",
             "header": [],

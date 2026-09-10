@@ -28,7 +28,7 @@ DEPARTMENTS = [
     {"name": "HR", "description": "Human resources, recruiting, and employee relations"},
 ]
 
-# One office location per department, plus HQ for the CEOs, so the frontend's
+# One office location per department, plus HQ for the Admins, so the frontend's
 # location filter has real variety to show.
 LOCATION_BY_DEPARTMENT = {
     "Banking & Finance": "New York, NY",
@@ -63,13 +63,13 @@ SKILLS_BY_JOB_TITLE = {
 # be created before employees. One shared password per role tier keeps this
 # easy to demo/log in with.
 
-CEO_PASSWORD = "ceopass123"
+ADMIN_PASSWORD = "adminpass123"
 MANAGER_PASSWORD = "managerpass123"
 EMPLOYEE_PASSWORD = "employeepass123"
 
-CEOS = [
+ADMINS = [
     {"first_name": "Robert", "last_name": "Chen", "email": "robert.chen@acme.com",
-     "job_title": "Chief Executive Officer", "password": CEO_PASSWORD},
+     "job_title": "Chief Executive Officer", "password": ADMIN_PASSWORD},
 ]
 
 # Exactly one manager per department.
@@ -93,15 +93,21 @@ EMPLOYEES = [
     {"first_name": "Michael", "last_name": "Brown", "email": "michael.brown@acme.com",
      "department": "Banking & Finance", "job_title": "Financial Analyst", "password": EMPLOYEE_PASSWORD},
     {"first_name": "Carol", "last_name": "White", "email": "carol.white@acme.com",
-     "department": "Banking & Finance", "job_title": "Loan Officer", "password": EMPLOYEE_PASSWORD},
+     "department": "Banking & Finance", "job_title": "Loan Officer", "password": EMPLOYEE_PASSWORD,
+     "manager_notes": "Consistently exceeds loan processing targets. Strong candidate for a "
+                       "senior loan officer track - raise it at her next review."},
     {"first_name": "Kevin", "last_name": "Lee", "email": "kevin.lee@acme.com",
-     "department": "Banking & Finance", "job_title": "Financial Analyst", "password": EMPLOYEE_PASSWORD},
+     "department": "Banking & Finance", "job_title": "Financial Analyst", "password": EMPLOYEE_PASSWORD,
+     "manager_notes": "Newer to the team - onboarding is going well but still ramping up on "
+                       "the risk models. Pair with Nancy Clark for the Q3 close."},
     {"first_name": "Nancy", "last_name": "Clark", "email": "nancy.clark@acme.com",
      "department": "Banking & Finance", "job_title": "Risk Analyst", "password": EMPLOYEE_PASSWORD},
 
     # -- Technology & Operations (reports to Emily Davis) --------------------
     {"first_name": "James", "last_name": "Wilson", "email": "james.wilson@acme.com",
-     "department": "Technology & Operations", "job_title": "Software Engineer", "password": EMPLOYEE_PASSWORD},
+     "department": "Technology & Operations", "job_title": "Software Engineer", "password": EMPLOYEE_PASSWORD,
+     "manager_notes": "Great technical depth but stays quiet in sprint planning. Encourage "
+                       "him to lead a small project next quarter to build his visibility."},
     {"first_name": "Steven", "last_name": "Lewis", "email": "steven.lewis@acme.com",
      "department": "Technology & Operations", "job_title": "IT Support Specialist", "password": EMPLOYEE_PASSWORD},
     {"first_name": "Angela", "last_name": "Walker", "email": "angela.walker@acme.com",
@@ -117,7 +123,9 @@ EMPLOYEES = [
     {"first_name": "Jason", "last_name": "King", "email": "jason.king@acme.com",
      "department": "HR", "job_title": "Recruiter", "password": EMPLOYEE_PASSWORD},
     {"first_name": "Michelle", "last_name": "Scott", "email": "michelle.scott@acme.com",
-     "department": "HR", "job_title": "HR Coordinator", "password": EMPLOYEE_PASSWORD},
+     "department": "HR", "job_title": "HR Coordinator", "password": EMPLOYEE_PASSWORD,
+     "manager_notes": "Reliable and detail-oriented. Follow up on the recruiting-rotation "
+                       "interest she raised in her last 1:1."},
     {"first_name": "Daniel", "last_name": "Adams", "email": "daniel.adams@acme.com",
      "department": "HR", "job_title": "Recruiter", "password": EMPLOYEE_PASSWORD},
 ]
@@ -140,10 +148,10 @@ def seed_departments():
     return by_name
 
 
-def seed_ceos():
+def seed_admins():
     existing_emails = {row["email"] for row in db.list_employees()}
 
-    for person in CEOS:
+    for person in ADMINS:
         if person["email"] in existing_emails:
             print(f"  skipping (already exists): {person['email']}")
             continue
@@ -155,13 +163,13 @@ def seed_ceos():
             "job_title": person["job_title"],
             "department_id": None,
             "manager_id": None,
-            "role": "CEO",
+            "role": "ADMIN",
             "skills": SKILLS_BY_JOB_TITLE.get(person["job_title"], []),
             "location": HQ_LOCATION,
         }
         try:
             db.create_employee(data, auth.hash_password(person["password"]))
-            print(f"  created CEO: {person['first_name']} {person['last_name']} ({person['email']})")
+            print(f"  created ADMIN: {person['first_name']} {person['last_name']} ({person['email']})")
         except UniqueViolation:
             print(f"  skipping (already exists): {person['email']}")
 
@@ -209,11 +217,21 @@ def get_manager_ids_by_department(department_ids_by_name):
 
 
 def seed_employees(department_ids_by_name, manager_ids_by_department):
-    existing_emails = {row["email"] for row in db.list_employees()}
+    existing_by_email = {row["email"]: row for row in db.list_employees()}
 
     for person in EMPLOYEES:
-        if person["email"] in existing_emails:
-            print(f"  skipping (already exists): {person['email']}")
+        existing = existing_by_email.get(person["email"])
+        if existing is not None:
+            # Already seeded from a previous run - just backfill manager_notes
+            # if this person has sample notes that haven't been set yet, so
+            # re-running the script still populates new demo data on a
+            # database that was seeded before manager_notes existed.
+            notes = person.get("manager_notes")
+            if notes and not existing.get("manager_notes"):
+                db.update_employee(existing["id"], {"manager_notes": notes})
+                print(f"  backfilled manager_notes: {person['email']}")
+            else:
+                print(f"  skipping (already exists): {person['email']}")
             continue
 
         data = {
@@ -226,6 +244,7 @@ def seed_employees(department_ids_by_name, manager_ids_by_department):
             "role": "EMPLOYEE",
             "skills": SKILLS_BY_JOB_TITLE.get(person["job_title"], []),
             "location": LOCATION_BY_DEPARTMENT[person["department"]],
+            "manager_notes": person.get("manager_notes"),
         }
 
         try:
@@ -239,8 +258,8 @@ def main():
     print("Seeding departments...")
     department_ids_by_name = seed_departments()
 
-    print("\nSeeding CEOs...")
-    seed_ceos()
+    print("\nSeeding Admins...")
+    seed_admins()
 
     print("\nSeeding managers...")
     seed_managers(department_ids_by_name)
@@ -251,7 +270,7 @@ def main():
     seed_employees(department_ids_by_name, manager_ids_by_department)
 
     print("\nDone. Sample logins (see README.md for the full table):")
-    print(f"  CEO:      robert.chen@acme.com / {CEO_PASSWORD}")
+    print(f"  Admin:    robert.chen@acme.com / {ADMIN_PASSWORD}")
     print(f"  Manager:  sarah.johnson@acme.com / {MANAGER_PASSWORD}")
     print(f"  Employee: carol.white@acme.com / {EMPLOYEE_PASSWORD}")
 

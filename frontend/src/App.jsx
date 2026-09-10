@@ -17,13 +17,27 @@ function Shell() {
   }
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f4f6f8' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f4f6f8', overflowX: 'hidden' }}>
       <Sidebar />
-      <Box component="main" sx={{ flexGrow: 1, width: `calc(100% - ${SIDEBAR_WIDTH}px)`, p: 4 }}>
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          width: { xs: '100%', md: `calc(100% - ${SIDEBAR_WIDTH}px)` },
+          minWidth: 0,
+          maxWidth: '100%',
+          overflowX: 'hidden',
+          p: { xs: 2, sm: 3, md: 4 },
+          // Extra top padding on mobile clears the fixed hamburger AppBar
+          // Sidebar renders below the `md` breakpoint.
+          pt: { xs: 9, md: 4 },
+        }}
+      >
         <Routes>
           <Route path="/" element={<Directory />} />
           <Route path="/requests" element={<Requests />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/employees/:id" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Box>

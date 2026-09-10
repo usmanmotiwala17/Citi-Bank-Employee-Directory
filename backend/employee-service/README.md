@@ -8,24 +8,48 @@ role-based permissions. See [function.py](function.py) for routes,
 ## Roles
 
 Three roles, replacing the old `admin`/`manager`/`employee` model with a
-Citi-style, department-scoped hierarchy:
+Citi-style, department-scoped hierarchy. Viewing and managing are scoped
+differently: **every** authenticated employee can view **every** other
+employee's profile, company-wide, read-only - only *managing* (editing
+someone else, deactivating them) is scoped by role:
 
-| Role       | Access |
+| Role       | Can manage (edit/deactivate) |
 |------------|--------|
-| `CEO`      | Full access to every employee and department; the only role that can create, update, or delete anyone. |
-| `MANAGER`  | Can view and manage (edit job title / active status, deactivate) employees within their own department only. Scoped to one department. |
-| `EMPLOYEE` | Can view and edit (phone/bio) their own profile only. Scoped to one department. |
+| `ADMIN`    | Anyone, and the only role that can create employees/departments. |
+| `MANAGER`  | Employees within their own department only. |
+| `EMPLOYEE` | No one but themselves (skills/availability only - phone goes through a change request). |
+
+`manager_notes` is the one field that isn't universally viewable: it's
+restricted to the ADMIN and the subject's own direct manager, and is never
+included in a response served to the employee it's about (see below).
 
 The JWT issued at login carries both `role` and `department_id` (`null` for
-CEOs, since they aren't scoped to one department), and both are re-checked
+Admins, since they aren't scoped to one department), and both are re-checked
 against the database on every request - so changing someone's role or
 department invalidates their existing token immediately.
+
+There is only ever one active Admin at a time - creating or promoting a
+second one is rejected with a 400.
+
+## Other employee fields
+
+- `manager_notes` - free-text notes visible/editable only by the Admin and
+  the employee's direct manager. It's omitted entirely from any response
+  served to the employee it's about (rather than sent blank), and self-
+  service updates can never touch it.
+- `availability_status` - `"available"` or `"unavailable"`, defaults to
+  `"available"`. Anyone can edit their own, and no one else's.
+
+`GET /employees/{id}` also returns `manager` (brief info on who this
+person reports to, if anyone) and, for a `MANAGER`, `direct_reports` (brief
+info on everyone reporting to them) - used to render org structure on the
+frontend's profile pages.
 
 ## Seeding sample data
 
 [seed_data.py](seed_data.py) creates 3 departments (Banking & Finance,
 Technology & Operations, HR), one manager per department, and 13 employees -
-17 people total (1 CEO, 3 MANAGER, 13 EMPLOYEE). Each employee's
+17 people total (1 ADMIN, 3 MANAGER, 13 EMPLOYEE). Each employee's
 `manager_id` is set to their department's manager, so the reporting line is
 actually wired up rather than left blank:
 
@@ -35,7 +59,7 @@ python3 seed_data.py
 
 | Name | Email | Role | Department | Job Title | Reports To |
 |------|-------|------|------------|-----------|------------|
-| Robert Chen | robert.chen@acme.com | CEO | — | Chief Executive Officer | — |
+| Robert Chen | robert.chen@acme.com | ADMIN | — | Chief Executive Officer | — |
 | Sarah Johnson | sarah.johnson@acme.com | MANAGER | Banking & Finance | Banking & Finance Manager | — |
 | Emily Davis | emily.davis@acme.com | MANAGER | Technology & Operations | Technology & Operations Manager | — |
 | Patricia Garcia | patricia.garcia@acme.com | MANAGER | HR | HR Manager | — |
@@ -53,7 +77,7 @@ python3 seed_data.py
 | Michelle Scott | michelle.scott@acme.com | EMPLOYEE | HR | HR Coordinator | Patricia Garcia |
 | Daniel Adams | daniel.adams@acme.com | EMPLOYEE | HR | Recruiter | Patricia Garcia |
 
-Passwords are shared per role tier for easy demo logins: `ceopass123` /
+Passwords are shared per role tier for easy demo logins: `adminpass123` /
 `managerpass123` / `employeepass123`.
 
 ## Running locally over real HTTP

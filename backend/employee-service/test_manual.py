@@ -19,7 +19,7 @@ from function import handler
 # different order (IDs are assigned by Postgres in insertion order).
 # ---------------------------------------------------------------------------
 
-CEO_EMAIL, CEO_PASSWORD, CEO_ID = "robert.chen@acme.com", "ceopass123", 1
+ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_ID = "robert.chen@acme.com", "adminpass123", 1
 BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD, BANKING_MANAGER_ID = "sarah.johnson@acme.com", "managerpass123", 3
 TECH_MANAGER_EMAIL, TECH_MANAGER_PASSWORD = "emily.davis@acme.com", "managerpass123"
 BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD, BANKING_EMPLOYEE_ID = "carol.white@acme.com", "employeepass123", 7
@@ -70,40 +70,44 @@ def login(email, password):
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_login_ceo():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+def test_login_admin():
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     return token is not None
 
 
-def test_ceo_sees_all_employees():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+def test_admin_sees_all_employees():
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     status, body = call("GET", "/employees", token=token)
-    return status == 200 and isinstance(body, list) and len(body) == 18
+    return status == 200 and isinstance(body, list) and len(body) == 17
 
 
-def test_manager_sees_only_own_department():
-    token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
-    status, body = call("GET", "/employees", token=token)
-    all_same_department = bool(body) and all(row["department_id"] == body[0]["department_id"] for row in body)
-    return status == 200 and all_same_department
+def test_all_roles_see_company_wide_directory():
+    """Viewing is company-wide for every role now - only managing is scoped
+    (see test_employee_cannot_edit_another_employee /
+    test_manager_cannot_edit_employee_in_other_department below)."""
+    for email, password in (
+        (ADMIN_EMAIL, ADMIN_PASSWORD),
+        (BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD),
+        (BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD),
+    ):
+        token = login(email, password)
+        status, body = call("GET", "/employees", token=token)
+        department_ids = {row["department_id"] for row in body if row["department_id"] is not None}
+        if status != 200 or len(department_ids) < 2:
+            return False
+    return True
 
 
-def test_employee_sees_only_self():
-    token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
-    status, body = call("GET", "/employees", token=token)
-    return status == 200 and isinstance(body, list) and len(body) == 1 and body[0]["email"] == BANKING_EMPLOYEE_EMAIL
-
-
-def test_employee_cannot_view_another_employee():
+def test_employee_can_view_another_employee():
     token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
     status, _ = call("GET", f"/employees/{TECH_EMPLOYEE_ID}", token=token)
-    return status == 403
+    return status == 200
 
 
-def test_manager_cannot_view_other_department():
+def test_manager_can_view_employee_in_other_department():
     token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
     status, _ = call("GET", f"/employees/{TECH_EMPLOYEE_ID}", token=token)
-    return status == 403
+    return status == 200
 
 
 def test_manager_can_view_own_department_employee():
@@ -112,15 +116,45 @@ def test_manager_can_view_own_department_employee():
     return status == 200
 
 
-def test_manager_can_edit_own_department_employee():
+def test_manager_can_edit_direct_report_contact_fields():
+    """A manager can edit phone/email/is_active - but only these - for
+    someone whose manager_id actually points at them."""
     token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
-    status, _ = call("PUT", f"/employees/{BANKING_EMPLOYEE_ID}", token=token, body={"job_title": "Senior Financial Analyst"})
+    status, _ = call(
+        "PUT", f"/employees/{BANKING_EMPLOYEE_ID}", token=token,
+        body={"phone": "555-3000", "email": "carol.white@acme.com", "is_active": True},
+    )
     return status == 200
+
+
+def test_manager_cannot_edit_job_title_of_direct_report():
+    """job_title is no longer manager-editable - only phone/email/is_active
+    (and manager_notes, via its own separate rule) are."""
+    token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
+    status, _ = call("PUT", f"/employees/{BANKING_EMPLOYEE_ID}", token=token, body={"job_title": "Should Fail"})
+    return status == 403
 
 
 def test_manager_cannot_reassign_department():
     token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
     status, _ = call("PUT", f"/employees/{BANKING_EMPLOYEE_ID}", token=token, body={"department_id": 2})
+    return status == 403
+
+
+def test_employee_cannot_edit_another_employee():
+    """Viewing another employee is allowed; editing them is not."""
+    token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
+    status, _ = call("PUT", f"/employees/{TECH_EMPLOYEE_ID}", token=token, body={"job_title": "Should Fail"})
+    return status == 403
+
+
+def test_manager_cannot_edit_employee_who_is_not_their_direct_report():
+    """Steven Lewis reports to Emily Davis, not Sarah Johnson - even though
+    a department-based rule might have let Sarah in before, Sarah gets no
+    edit access at all here, not even a field (phone) she'd normally be
+    allowed to touch on her own direct reports."""
+    token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
+    status, _ = call("PUT", f"/employees/{TECH_EMPLOYEE_ID}", token=token, body={"phone": "555-0000"})
     return status == 403
 
 
@@ -152,8 +186,8 @@ def test_manager_cannot_create():
     return status == 403
 
 
-def test_ceo_can_create_with_department():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+def test_admin_can_create_with_department():
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     status, _ = call(
         "POST", "/employees", token=token,
         body={
@@ -168,24 +202,24 @@ def test_ceo_can_create_with_department():
     return status == 201
 
 
-def test_ceo_cannot_create_ceo_with_department():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+def test_admin_cannot_create_admin_with_department():
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     status, _ = call(
         "POST", "/employees", token=token,
         body={
             "first_name": "Bad",
-            "last_name": "Ceo",
-            "email": "bad-ceo-test@acme.com",
+            "last_name": "Admin",
+            "email": "bad-admin-test@acme.com",
             "password": "whatever123",
-            "role": "CEO",
+            "role": "ADMIN",
             "department_id": 1,
         },
     )
     return status == 400
 
 
-def test_directory_tree_ceo_only():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+def test_directory_tree_admin_only():
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     status, _ = call("GET", "/directory-tree", token=token)
     return status == 200
 
@@ -197,7 +231,7 @@ def test_directory_tree_forbidden_for_manager():
 
 
 def test_create_department():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     status, _ = call(
         "POST", "/departments", token=token,
         body={"name": "Wealth Management", "description": "Investment advisory and wealth planning services"},
@@ -206,15 +240,81 @@ def test_create_department():
 
 
 def test_list_departments():
-    token = login(CEO_EMAIL, CEO_PASSWORD)
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
     status, _ = call("GET", "/departments", token=token)
     return status == 200
 
 
-def test_non_ceo_cannot_create_department():
+def test_non_admin_cannot_create_department():
     token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
     status, _ = call("POST", "/departments", token=token, body={"name": "Should Fail"})
     return status == 403
+
+
+# ---------------------------------------------------------------------------
+# Single active Admin
+# ---------------------------------------------------------------------------
+
+def test_admin_cannot_create_second_admin():
+    token = login(ADMIN_EMAIL, ADMIN_PASSWORD)
+    status, _ = call(
+        "POST", "/employees", token=token,
+        body={
+            "first_name": "Second",
+            "last_name": "Admin",
+            "email": "second-admin-test@acme.com",
+            "password": "whatever123",
+            "role": "ADMIN",
+        },
+    )
+    return status == 400
+
+
+# ---------------------------------------------------------------------------
+# manager_notes - private to Admin/direct manager, and org-structure links
+# ---------------------------------------------------------------------------
+
+def test_employee_never_sees_own_manager_notes():
+    manager_token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
+    call(
+        "PUT", f"/employees/{BANKING_EMPLOYEE_ID}", token=manager_token,
+        body={"manager_notes": "Test note from manager"},
+    )
+
+    employee_token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
+    _, self_view = call("GET", f"/employees/{BANKING_EMPLOYEE_ID}", token=employee_token)
+    _, self_list = call("GET", "/employees", token=employee_token)
+
+    return "manager_notes" not in self_view and "manager_notes" not in self_list[0]
+
+
+def test_manager_can_write_and_read_report_manager_notes():
+    manager_token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
+    status, _ = call(
+        "PUT", f"/employees/{BANKING_EMPLOYEE_ID}", token=manager_token,
+        body={"manager_notes": "Strong performer, ready for more responsibility."},
+    )
+    if status != 200:
+        return False
+
+    _, body = call("GET", f"/employees/{BANKING_EMPLOYEE_ID}", token=manager_token)
+    return body.get("manager_notes") == "Strong performer, ready for more responsibility."
+
+
+def test_employee_can_view_any_manager_but_never_sees_manager_notes():
+    employee_token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
+    status_own, own_manager = call("GET", f"/employees/{BANKING_MANAGER_ID}", token=employee_token)
+
+    tech_employee_token = login(TECH_EMPLOYEE_EMAIL, TECH_EMPLOYEE_PASSWORD)
+    status_unrelated, unrelated_manager = call("GET", f"/employees/{BANKING_MANAGER_ID}", token=tech_employee_token)
+
+    return (
+        status_own == 200
+        and "manager_notes" not in own_manager
+        and own_manager.get("direct_reports") is not None
+        and status_unrelated == 200
+        and "manager_notes" not in unrelated_manager
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -292,24 +392,30 @@ def test_manager_rejecting_change_request_leaves_employee_unchanged():
 # ---------------------------------------------------------------------------
 
 TESTS = (
-    test_login_ceo,
-    test_ceo_sees_all_employees,
-    test_manager_sees_only_own_department,
-    test_employee_sees_only_self,
-    test_employee_cannot_view_another_employee,
-    test_manager_cannot_view_other_department,
+    test_login_admin,
+    test_admin_sees_all_employees,
+    test_all_roles_see_company_wide_directory,
+    test_employee_can_view_another_employee,
+    test_manager_can_view_employee_in_other_department,
     test_manager_can_view_own_department_employee,
-    test_manager_can_edit_own_department_employee,
+    test_manager_can_edit_direct_report_contact_fields,
+    test_manager_cannot_edit_job_title_of_direct_report,
     test_manager_cannot_reassign_department,
+    test_employee_cannot_edit_another_employee,
+    test_manager_cannot_edit_employee_who_is_not_their_direct_report,
     test_employee_cannot_create,
     test_manager_cannot_create,
-    test_ceo_can_create_with_department,
-    test_ceo_cannot_create_ceo_with_department,
-    test_directory_tree_ceo_only,
+    test_admin_can_create_with_department,
+    test_admin_cannot_create_admin_with_department,
+    test_directory_tree_admin_only,
     test_directory_tree_forbidden_for_manager,
     test_create_department,
     test_list_departments,
-    test_non_ceo_cannot_create_department,
+    test_non_admin_cannot_create_department,
+    test_admin_cannot_create_second_admin,
+    test_employee_never_sees_own_manager_notes,
+    test_manager_can_write_and_read_report_manager_notes,
+    test_employee_can_view_any_manager_but_never_sees_manager_notes,
     test_employee_can_edit_only_skills,
     test_employee_can_submit_change_request,
     test_employee_cannot_view_change_requests,

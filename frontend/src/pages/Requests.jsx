@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Box, Typography, Alert, Table, TableHead, TableRow, TableCell, TableBody,
-  Paper, Button, Chip,
+  TableContainer, Paper, Button, Chip,
 } from '@mui/material'
 import { useAuth } from '../context/AuthContext'
 import { getChangeRequests, updateChangeRequest } from '../services/api'
@@ -56,8 +56,8 @@ function Requests() {
       {requests.length === 0 && !error ? (
         <Typography sx={{ color: 'text.secondary' }}>No pending requests.</Typography>
       ) : (
-        <Paper variant="outlined">
-          <Table>
+        <TableContainer component={Paper} variant="outlined">
+          <Table sx={{ minWidth: 560 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Employee</TableCell>
@@ -98,7 +98,7 @@ function Requests() {
               ))}
             </TableBody>
           </Table>
-        </Paper>
+        </TableContainer>
       )}
     </Box>
   )
