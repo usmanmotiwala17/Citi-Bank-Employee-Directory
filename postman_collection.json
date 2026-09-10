@@ -1,0 +1,554 @@
+{
+  "info": {
+    "_postman_id": "a5978a44-c26c-4d35-ba65-7a2c79fbe441",
+    "name": "Employee Directory API",
+    "description": "Backend API for the Walmart-style Employee Directory service (backend/employee-service). Covers every route in function.py's ROUTES table, using the accounts and ids from seed_data.py.\n\nRoles: CEO (full access), MANAGER (scoped to own department), EMPLOYEE (own profile only). Log in via a request in the Auth folder first - it saves the token into the jwt_token collection variable that every other request authenticates with.\n\nMake sure the local server is running first: `python3 local_server.py` from backend/employee-service (listens on :8000 by default), against a Postgres database seeded with `python3 seed_data.py`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "new_employee_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "new_department_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Log in as each role tier. Each request saves its token into the jwt_token collection variable, which the whole collection's Bearer auth reads from - so run one of these before any Employees/Departments request to switch who you're acting as.",
+      "item": [
+        {
+          "name": "Login CEO",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Logs in as Robert Chen (CEO). CEOs have full access to every employee and department, and are the only role that can create/delete employees or departments.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"robert.chen@acme.com\",\n  \"password\": \"ceopass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"jwt_token\", data.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Manager (Clothing)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Logs in as Sarah Johnson, the Clothing department manager (department_id 1). Managers can view/manage employees in their own department only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sarah.johnson@acme.com\",\n  \"password\": \"managerpass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"jwt_token\", data.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Employee (Clothing)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Logs in as Carol White, a Clothing department employee (id 7). Employees can view/edit their own profile only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"carol.white@acme.com\",\n  \"password\": \"employeepass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login succeeded\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const data = pm.response.json();",
+                  "pm.collectionVariables.set(\"jwt_token\", data.access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Employees",
+      "description": "Whatever role logged in most recently (via the Auth folder) is who these requests act as, since auth is inherited from the collection-level jwt_token variable.",
+      "item": [
+        {
+          "name": "List Employees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/employees",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees"
+              ]
+            },
+            "description": "CEO gets all 18. Manager gets only their own department. Employee gets a one-item list containing just themselves."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Employee By Id - Own Department (Carol White #7)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/employees/7",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees",
+                "7"
+              ]
+            },
+            "description": "Carol White is in Clothing (department_id 1). CEO can always view this; the Clothing manager (Sarah Johnson) can too, since it's her department; Carol herself can view it as her own profile."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Employee By Id - Cross-Department (Angela Walker #12, expect 403 as Manager)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/employees/12",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees",
+                "12"
+              ]
+            },
+            "description": "Angela Walker is in Grocery (department_id 2). CEO can view this fine. But if you're logged in as the Clothing manager (Sarah Johnson) or the Clothing employee (Carol White), this should come back 403 - neither of them has any visibility into Grocery."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Employee (CEO only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/employees",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees"
+              ]
+            },
+            "description": "Only a CEO can create employees - a manager or employee token gets 403 here. This new hire is placed in Clothing (department_id 1) reporting to Sarah Johnson (manager_id 3, the Clothing manager) - manager_id must reference a MANAGER in the same department or the request is rejected with a 400. On success, the new id is saved into the new_employee_id collection variable for the Delete Employee request below. Note: re-running this a second time will fail with 'Email already in use', since Delete Employee only deactivates (soft-delete) rather than freeing up the email.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"New\",\n  \"last_name\": \"Hire\",\n  \"email\": \"new.hire@acme.com\",\n  \"password\": \"newhire123\",\n  \"role\": \"EMPLOYEE\",\n  \"department_id\": 1,\n  \"manager_id\": 3,\n  \"job_title\": \"Sales Associate\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json();",
+                  "    pm.collectionVariables.set(\"new_employee_id\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Employee - Job Title",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/employees/7",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees",
+                "7"
+              ]
+            },
+            "description": "A manager can edit job_title/is_active for anyone in their own department, and the CEO can edit anything. Try this as the Clothing manager (allowed) vs. as Carol White herself (rejected - self-service is limited to phone/bio only).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_title\": \"Senior Sales Associate\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Employee - Reassign Department (CEO only)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/employees/7",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees",
+                "7"
+              ]
+            },
+            "description": "Only the CEO can change department_id or manager_id. This moves Carol White from Clothing to Grocery - note department_id and manager_id have to be updated together here, because the new manager_id must belong to the new department (manager id 4 is Emily Davis, the Grocery manager). Submitting department_id alone without also updating manager_id would fail validation, since her old manager (Sarah Johnson, id 3) isn't the manager of Grocery.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"department_id\": 2,\n  \"manager_id\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete (Deactivate) Employee",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/employees/{{new_employee_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "employees",
+                "{{new_employee_id}}"
+              ]
+            },
+            "description": "Soft-deletes (is_active = false) the employee created by 'Create Employee' above - run that request first in this session so new_employee_id is populated. CEO can deactivate anyone; a manager can deactivate anyone in their own department."
+          },
+          "response": []
+        },
+        {
+          "name": "Directory Tree (CEO only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/directory-tree",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "directory-tree"
+              ]
+            },
+            "description": "Company-wide view: all CEOs, plus every department with its manager and employees. CEO-only - a manager or employee token gets 403 (they already get their own department's people from List Employees)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Departments",
+      "item": [
+        {
+          "name": "List Departments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/departments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "departments"
+              ]
+            },
+            "description": "Any authenticated role can list departments."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Department By Id (Clothing #1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/departments/1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "departments",
+                "1"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Department (CEO only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/departments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "departments"
+              ]
+            },
+            "description": "CEO-only. On success, saves the new department's id into the new_department_id collection variable for the Delete Department request below.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Toys\",\n  \"description\": \"Toys and games\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json();",
+                  "    pm.collectionVariables.set(\"new_department_id\", data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Department",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/departments/1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "departments",
+                "1"
+              ]
+            },
+            "description": "CEO-only. Updates the Clothing department's description.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Apparel, shoes, and accessories - updated via Postman demo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Department (CEO only)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/departments/{{new_department_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "departments",
+                "{{new_department_id}}"
+              ]
+            },
+            "description": "Deletes the department created by 'Create Department' above - run that request first so new_department_id is populated. Deliberately targets the demo department rather than Clothing/Grocery/Electronics: those have employees pointing at them via department_id, and the departments table has no ON DELETE CASCADE, so deleting a department that's still referenced would fail."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

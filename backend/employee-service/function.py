@@ -21,11 +21,13 @@ logger.setLevel(logging.INFO)
 
 VALID_ROLES = db.VALID_ROLES
 
-PUBLIC_EMPLOYEE_FIELDS = (
+EMPLOYEE_FIELDS = (
     "id", "first_name", "last_name", "email", "phone",
     "job_title", "department_id", "manager_id", "is_active",
+    "bio", "role", "created_at", "skills", "location",
 )
-FULL_EMPLOYEE_EXTRA_FIELDS = ("bio", "role", "created_at")
+
+CHANGE_REQUEST_FIELDS = ("phone",)
 
 
 class ValidationError(Exception):
@@ -62,58 +64,115 @@ def parse_body(event):
 
 
 # ---------------------------------------------------------------------------
-# Serialization (role-based field visibility)
+# Serialization
 # ---------------------------------------------------------------------------
+#
+# Unlike the old admin/manager/employee version, there's no "public directory"
+# tier anymore: if you're not allowed to see someone (see _can_view below),
+# you don't get a trimmed-down record - you get a 403. So serialization no
+# longer needs to branch on the viewer; it's just a flat field selection.
 
-def _can_view_full_detail(viewer, employee_row):
-    if viewer["role"] == "admin":
-        return True
-    if viewer["id"] == employee_row["id"]:
-        return True
-    if viewer["role"] == "manager" and employee_row["manager_id"] == viewer["id"]:
-        return True
-    return False
-
-
-def serialize_employee(employee_row, viewer):
-    data = {field: employee_row[field] for field in PUBLIC_EMPLOYEE_FIELDS}
-    if _can_view_full_detail(viewer, employee_row):
-        for field in FULL_EMPLOYEE_EXTRA_FIELDS:
-            data[field] = employee_row[field]
-    return data
+def serialize_employee(employee_row):
+    return {field: employee_row[field] for field in EMPLOYEE_FIELDS}
 
 
 def serialize_department(department_row):
     return {"id": department_row["id"], "name": department_row["name"], "description": department_row["description"]}
 
 
+def serialize_change_request(request_row, employee_row):
+    return {
+        "id": request_row["id"],
+        "employee_id": request_row["employee_id"],
+        "employee_name": f"{employee_row['first_name']} {employee_row['last_name']}",
+        "department_id": employee_row["department_id"],
+        "field": request_row["field_name"],
+        "requested_value": request_row["requested_value"],
+        "current_value": employee_row.get(request_row["field_name"]),
+        "status": request_row["status"],
+        "created_at": request_row["created_at"],
+        "reviewed_by": request_row["reviewed_by"],
+        "reviewed_at": request_row["reviewed_at"],
+    }
+
+
 # ---------------------------------------------------------------------------
-# Hierarchy validation (admin -> null, manager -> admin, employee -> manager)
+# Permissions
+# ---------------------------------------------------------------------------
+#
+# Role model (replaces the old admin/manager/employee hierarchy, which scoped
+# a manager to their direct reports via manager_id):
+#   CEO      - full access to every employee and department.
+#   MANAGER  - can view/manage employees within their own department only.
+#   EMPLOYEE - can view their own profile only.
+
+def _can_view(viewer, employee_row):
+    if viewer["role"] == "CEO":
+        return True
+    if viewer["id"] == employee_row["id"]:
+        return True
+    if viewer["role"] == "MANAGER" and employee_row["department_id"] == viewer["department_id"]:
+        return True
+    return False
+
+
+def _can_manage(viewer, employee_row):
+    """Manage = update/deactivate. Same rule as viewing, minus self-service
+    (self-service is handled separately with a narrower set of fields)."""
+    if viewer["role"] == "CEO":
+        return True
+    if viewer["role"] == "MANAGER" and employee_row["department_id"] == viewer["department_id"]:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Department validation (CEO -> no department, MANAGER/EMPLOYEE -> required)
 # ---------------------------------------------------------------------------
 
-def validate_manager_hierarchy(role, manager_id, exclude_id=None):
+def validate_skills(value):
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValidationError("skills must be a list of strings")
+    return value
+
+
+def validate_department(role, department_id):
     if role not in VALID_ROLES:
         raise ValidationError(f"role must be one of {', '.join(VALID_ROLES)}")
 
-    if role == "admin":
-        if manager_id is not None:
-            raise ValidationError("Admins must not have a manager (manager_id must be null)")
+    if role == "CEO":
+        if department_id is not None:
+            raise ValidationError("A CEO has company-wide access and must not be assigned to a single department (department_id must be null)")
         return
 
+    if department_id is None:
+        raise ValidationError(f"A '{role}' must have a department_id set")
+    if db.get_department_by_id(department_id) is None:
+        raise ValidationError("department_id does not reference an existing department")
+
+
+# ---------------------------------------------------------------------------
+# manager_id validation - each department has exactly one manager, and
+# manager_id is meant to record who an employee actually reports to, not
+# just any employee id.
+# ---------------------------------------------------------------------------
+
+def validate_manager_id(role, department_id, manager_id):
     if manager_id is None:
-        raise ValidationError(f"A '{role}' must have a manager_id set")
-    if exclude_id is not None and manager_id == exclude_id:
-        raise ValidationError("manager_id cannot reference the employee itself")
+        return
+
+    if role == "CEO":
+        raise ValidationError("A CEO does not report to a manager (manager_id must be null)")
 
     manager = db.get_employee_by_id(manager_id)
     if manager is None:
         raise ValidationError("manager_id does not reference an existing employee")
-
-    required_manager_role = "admin" if role == "manager" else "manager"
-    if manager["role"] != required_manager_role:
-        raise ValidationError(
-            f"A '{role}' must report to an employee with role '{required_manager_role}'"
-        )
+    if manager["role"] != "MANAGER":
+        raise ValidationError("manager_id must reference an employee with role 'MANAGER'")
+    if department_id is not None and manager["department_id"] != department_id:
+        raise ValidationError("manager_id must reference the manager of the same department")
 
 
 # ---------------------------------------------------------------------------
@@ -133,12 +192,13 @@ def login_route(event):
     if not employee["is_active"]:
         raise AuthError("Account is inactive", status_code=401)
 
-    token = auth.create_access_token(employee["id"], employee["role"], employee["token_version"])
-    viewer = {"id": employee["id"], "role": employee["role"]}
+    token = auth.create_access_token(
+        employee["id"], employee["role"], employee["department_id"], employee["token_version"]
+    )
     return response(200, {
         "access_token": token,
         "token_type": "bearer",
-        "employee": serialize_employee(employee, viewer),
+        "employee": serialize_employee(employee),
     })
 
 
@@ -147,7 +207,9 @@ def login_route(event):
 # ---------------------------------------------------------------------------
 
 def create_employee_route(event, user):
-    auth.require_role(user, ["admin"])
+    # Only the CEO can create new accounts - "manage within your department"
+    # (MANAGER) covers viewing/editing/deactivating, not onboarding.
+    auth.require_role(user, ["CEO"])
     body = parse_body(event)
 
     required_fields = ("first_name", "last_name", "email", "password")
@@ -159,13 +221,12 @@ def create_employee_route(event, user):
     if "@" not in email:
         raise ValidationError("Invalid email address")
 
-    role = body.get("role", "employee")
-    manager_id = body.get("manager_id")
-    validate_manager_hierarchy(role, manager_id)
-
+    role = body.get("role", "EMPLOYEE")
     department_id = body.get("department_id")
-    if department_id is not None and db.get_department_by_id(department_id) is None:
-        raise ValidationError("department_id does not reference an existing department")
+    validate_department(role, department_id)
+
+    manager_id = body.get("manager_id")
+    validate_manager_id(role, department_id, manager_id)
 
     is_active = body.get("is_active", True)
     if not isinstance(is_active, bool):
@@ -182,6 +243,8 @@ def create_employee_route(event, user):
         "bio": body.get("bio"),
         "role": role,
         "is_active": is_active,
+        "skills": validate_skills(body.get("skills")),
+        "location": body.get("location"),
     }
 
     try:
@@ -189,19 +252,26 @@ def create_employee_route(event, user):
     except UniqueViolation:
         raise ValidationError("Email already in use")
 
-    return response(201, serialize_employee(created, user))
+    return response(201, serialize_employee(created))
 
 
 def list_employees_route(event, user):
-    rows = db.list_employees()
-    return response(200, [serialize_employee(row, user) for row in rows])
+    if user["role"] == "CEO":
+        rows = db.list_employees()
+    elif user["role"] == "MANAGER":
+        rows = db.list_employees_by_department(user["department_id"])
+    else:  # EMPLOYEE - can only ever see themselves
+        rows = [db.get_employee_by_id(user["id"])]
+    return response(200, [serialize_employee(row) for row in rows])
 
 
 def get_employee_route(event, user, employee_id):
     employee = db.get_employee_by_id(employee_id)
     if employee is None:
         raise NotFoundError("Employee not found")
-    return response(200, serialize_employee(employee, user))
+    if not _can_view(user, employee):
+        raise AuthError("Not permitted to view this employee", status_code=403)
+    return response(200, serialize_employee(employee))
 
 
 def update_employee_route(event, user, employee_id):
@@ -214,15 +284,16 @@ def update_employee_route(event, user, employee_id):
         raise ValidationError("Request body must include at least one field to update")
 
     # Determine which fields this actor is allowed to touch on this target.
-    if user["role"] == "admin":
+    if user["role"] == "CEO":
         allowed_fields = {
             "first_name", "last_name", "email", "phone", "job_title",
             "department_id", "manager_id", "bio", "role", "is_active",
+            "skills", "location",
         }
     elif user["id"] == target["id"]:
-        allowed_fields = {"phone", "bio"}
-    elif user["role"] == "manager" and target["manager_id"] == user["id"]:
-        allowed_fields = {"job_title", "department_id", "is_active"}
+        allowed_fields = {"skills"}
+    elif _can_manage(user, target):
+        allowed_fields = {"job_title", "is_active"}
     else:
         raise AuthError("Not permitted to update this employee", status_code=403)
 
@@ -258,35 +329,43 @@ def update_employee_route(event, user, employee_id):
             raise ValidationError("is_active must be a boolean")
         fields["is_active"] = body["is_active"]
     if "department_id" in body:
-        department_id = body["department_id"]
-        if department_id is not None and db.get_department_by_id(department_id) is None:
-            raise ValidationError("department_id does not reference an existing department")
-        fields["department_id"] = department_id
+        fields["department_id"] = body["department_id"]
     if "role" in body:
         fields["role"] = body["role"]
     if "manager_id" in body:
         fields["manager_id"] = body["manager_id"]
+    if "skills" in body:
+        fields["skills"] = validate_skills(body["skills"])
+    if "location" in body:
+        fields["location"] = body["location"]
 
     if not fields:
         raise ValidationError("No valid fields provided to update")
 
-    # Re-validate the hierarchy rules whenever role or manager_id changes,
-    # merging with the target's current values for whichever one isn't changing.
-    if "role" in fields or "manager_id" in fields:
+    # Re-validate department/manager rules whenever role, department_id, or
+    # manager_id changes, merging with the target's current values for
+    # whichever ones aren't changing - e.g. changing just the department
+    # still needs to re-check that the existing manager_id still matches.
+    if "role" in fields or "department_id" in fields or "manager_id" in fields:
         new_role = fields.get("role", target["role"])
+        new_department_id = fields.get("department_id", target["department_id"])
         new_manager_id = fields.get("manager_id", target["manager_id"])
-        validate_manager_hierarchy(new_role, new_manager_id, exclude_id=target["id"])
+        validate_department(new_role, new_department_id)
+        validate_manager_id(new_role, new_department_id, new_manager_id)
 
     try:
         updated = db.update_employee(target["id"], fields)
     except UniqueViolation:
         raise ValidationError("Email already in use")
 
-    # A stale JWT would keep carrying the old role - invalidate it immediately.
-    if "role" in fields and fields["role"] != target["role"]:
+    # A stale JWT would keep carrying the old role/department - invalidate it
+    # immediately rather than waiting for it to expire.
+    role_changed = "role" in fields and fields["role"] != target["role"]
+    department_changed = "department_id" in fields and fields["department_id"] != target["department_id"]
+    if role_changed or department_changed:
         db.bump_token_version(target["id"])
 
-    return response(200, serialize_employee(updated, user))
+    return response(200, serialize_employee(updated))
 
 
 def delete_employee_route(event, user, employee_id):
@@ -294,25 +373,73 @@ def delete_employee_route(event, user, employee_id):
     if target is None:
         raise NotFoundError("Employee not found")
 
-    is_own_direct_report = user["role"] == "manager" and target["manager_id"] == user["id"]
-    if user["role"] != "admin" and not is_own_direct_report:
+    if not _can_manage(user, target):
         raise AuthError("Not permitted to deactivate this employee", status_code=403)
 
     db.deactivate_employee(employee_id)
     return response(204)
 
 
-def list_reports_route(event, user, employee_id):
-    target = db.get_employee_by_id(employee_id)
+# ---------------------------------------------------------------------------
+# Change requests
+#
+# Employees can't edit their own phone number directly (see allowed_fields
+# above) - instead they submit a request here, and their manager/the CEO
+# approves or rejects it. Approval is what actually updates the employee row.
+# ---------------------------------------------------------------------------
+
+def create_change_request_route(event, user):
+    body = parse_body(event)
+    field = body.get("field")
+    value = body.get("value")
+    if field not in CHANGE_REQUEST_FIELDS:
+        raise ValidationError(f"field must be one of {', '.join(CHANGE_REQUEST_FIELDS)}")
+    if not value:
+        raise ValidationError("value is required")
+
+    created = db.create_change_request(user["id"], field, value)
+    employee = db.get_employee_by_id(user["id"])
+    return response(201, serialize_change_request(created, employee))
+
+
+def list_change_requests_route(event, user):
+    auth.require_role(user, ["CEO", "MANAGER"])
+    if user["role"] == "CEO":
+        rows = db.list_pending_change_requests()
+    else:
+        rows = db.list_pending_change_requests_by_department(user["department_id"])
+
+    results = []
+    for row in rows:
+        employee = db.get_employee_by_id(row["employee_id"])
+        results.append(serialize_change_request(row, employee))
+    return response(200, results)
+
+
+def update_change_request_route(event, user, request_id):
+    request_row = db.get_change_request_by_id(request_id)
+    if request_row is None:
+        raise NotFoundError("Change request not found")
+
+    target = db.get_employee_by_id(request_row["employee_id"])
     if target is None:
         raise NotFoundError("Employee not found")
+    if not _can_manage(user, target):
+        raise AuthError("Not permitted to review this change request", status_code=403)
+    if request_row["status"] != "pending":
+        raise ValidationError("This change request has already been reviewed")
 
-    is_own_team = user["role"] == "manager" and user["id"] == employee_id
-    if user["role"] != "admin" and not is_own_team:
-        raise AuthError("Not permitted to view these reports", status_code=403)
+    body = parse_body(event)
+    status = body.get("status")
+    if status not in ("approved", "rejected"):
+        raise ValidationError("status must be 'approved' or 'rejected'")
 
-    rows = db.list_direct_reports(employee_id)
-    return response(200, [serialize_employee(row, user) for row in rows])
+    if status == "approved":
+        db.update_employee(target["id"], {request_row["field_name"]: request_row["requested_value"]})
+        target = db.get_employee_by_id(target["id"])
+
+    updated_request = db.update_change_request(request_id, status, user["id"])
+    return response(200, serialize_change_request(updated_request, target))
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +447,7 @@ def list_reports_route(event, user, employee_id):
 # ---------------------------------------------------------------------------
 
 def create_department_route(event, user):
-    auth.require_role(user, ["admin"])
+    auth.require_role(user, ["CEO"])
     body = parse_body(event)
     name = (body.get("name") or "").strip()
     if not name:
@@ -347,7 +474,7 @@ def get_department_route(event, user, department_id):
 
 
 def update_department_route(event, user, department_id):
-    auth.require_role(user, ["admin"])
+    auth.require_role(user, ["CEO"])
     existing = db.get_department_by_id(department_id)
     if existing is None:
         raise NotFoundError("Department not found")
@@ -374,7 +501,7 @@ def update_department_route(event, user, department_id):
 
 
 def delete_department_route(event, user, department_id):
-    auth.require_role(user, ["admin"])
+    auth.require_role(user, ["CEO"])
     existing = db.get_department_by_id(department_id)
     if existing is None:
         raise NotFoundError("Department not found")
@@ -384,17 +511,22 @@ def delete_department_route(event, user, department_id):
 
 
 # ---------------------------------------------------------------------------
-# Directory tree: admins -> their managers -> their employees
+# Directory tree: CEOs -> departments -> their managers/employees
 # ---------------------------------------------------------------------------
+#
+# The old version grouped by manager_id (admin -> their managers -> their
+# employees). Management is now scoped by department instead, so the tree is
+# grouped by department instead of by manager_id chains. Company-wide, so
+# it's CEO-only - a MANAGER already gets their department's employees from
+# GET /employees.
 
 def directory_tree_route(event, user):
+    auth.require_role(user, ["CEO"])
+
     rows = db.list_employees()
+    departments = db.list_departments()
 
-    reports_by_manager = {}
-    for row in rows:
-        reports_by_manager.setdefault(row["manager_id"], []).append(row)
-
-    def build_node(employee_row):
+    def brief(employee_row):
         return {
             "id": employee_row["id"],
             "first_name": employee_row["first_name"],
@@ -402,11 +534,20 @@ def directory_tree_route(event, user):
             "email": employee_row["email"],
             "role": employee_row["role"],
             "job_title": employee_row["job_title"],
-            "reports": [build_node(child) for child in reports_by_manager.get(employee_row["id"], [])],
         }
 
-    tree = [build_node(row) for row in rows if row["role"] == "admin"]
-    return response(200, tree)
+    ceos = [brief(row) for row in rows if row["role"] == "CEO"]
+
+    dept_tree = []
+    for department in departments:
+        dept_rows = [row for row in rows if row["department_id"] == department["id"]]
+        dept_tree.append({
+            "department": department["name"],
+            "managers": [brief(row) for row in dept_rows if row["role"] == "MANAGER"],
+            "employees": [brief(row) for row in dept_rows if row["role"] == "EMPLOYEE"],
+        })
+
+    return response(200, {"ceos": ceos, "departments": dept_tree})
 
 
 # ---------------------------------------------------------------------------
@@ -420,10 +561,12 @@ ROUTES = (
     ("POST", re.compile(r"^/auth/login$"), False, login_route),
     ("POST", re.compile(r"^/employees$"), True, create_employee_route),
     ("GET", re.compile(r"^/employees$"), True, list_employees_route),
-    ("GET", re.compile(r"^/employees/(?P<id>\d+)/reports$"), True, list_reports_route),
     ("GET", re.compile(r"^/employees/(?P<id>\d+)$"), True, get_employee_route),
     ("PUT", re.compile(r"^/employees/(?P<id>\d+)$"), True, update_employee_route),
     ("DELETE", re.compile(r"^/employees/(?P<id>\d+)$"), True, delete_employee_route),
+    ("POST", re.compile(r"^/change-requests$"), True, create_change_request_route),
+    ("GET", re.compile(r"^/change-requests$"), True, list_change_requests_route),
+    ("PUT", re.compile(r"^/change-requests/(?P<id>\d+)$"), True, update_change_request_route),
     ("POST", re.compile(r"^/departments$"), True, create_department_route),
     ("GET", re.compile(r"^/departments$"), True, list_departments_route),
     ("GET", re.compile(r"^/departments/(?P<id>\d+)$"), True, get_department_route),

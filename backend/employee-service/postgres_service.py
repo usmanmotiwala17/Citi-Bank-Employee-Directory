@@ -32,7 +32,7 @@ PG_CONFIG = (
 # invocations. Persists between invocations within the same Lambda container.
 PG_CONN = None
 
-VALID_ROLES = ("employee", "manager", "admin")
+VALID_ROLES = ("EMPLOYEE", "MANAGER", "CEO")
 
 
 def get_connection():
@@ -48,7 +48,32 @@ def get_connection():
     global PG_CONN
     if PG_CONN is None or PG_CONN.closed:
         PG_CONN = connect(PG_CONFIG, autocommit=True, row_factory=dict_row)
+        _ensure_schema(PG_CONN)
     return PG_CONN
+
+
+def _ensure_schema(conn):
+    """
+    There's no separate migration tool for this project - schema changes are
+    applied as idempotent DDL here, run once per new pooled connection.
+    """
+    with conn.cursor() as cur:
+        cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS skills TEXT[] NOT NULL DEFAULT '{}'")
+        cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS location TEXT")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS change_requests (
+                id SERIAL PRIMARY KEY,
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                field_name TEXT NOT NULL,
+                requested_value TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                reviewed_by INTEGER REFERENCES employees(id),
+                reviewed_at TIMESTAMPTZ
+            )
+            """
+        )
 
 
 def reset_connection():
@@ -84,7 +109,7 @@ def _execute(query, params=None, fetchone=False, fetchall=False):
 
 EMPLOYEE_FULL_COLUMNS = (
     "id, first_name, last_name, email, phone, job_title, department_id, "
-    "manager_id, bio, role, is_active, created_at"
+    "manager_id, bio, role, is_active, created_at, skills, location"
 )
 
 
@@ -108,7 +133,7 @@ def get_employee_by_email(email):
 def get_employee_auth_state(employee_id):
     """Minimal row used to validate a decoded JWT against current DB state."""
     return _execute(
-        "SELECT id, role, is_active, token_version FROM employees WHERE id = %s",
+        "SELECT id, role, department_id, is_active, token_version FROM employees WHERE id = %s",
         (employee_id,),
         fetchone=True,
     )
@@ -121,10 +146,11 @@ def list_employees():
     )
 
 
-def list_direct_reports(manager_id):
+def list_employees_by_department(department_id):
+    """Used to scope a MANAGER's view/management to their own department."""
     return _execute(
-        f"SELECT {EMPLOYEE_FULL_COLUMNS} FROM employees WHERE manager_id = %s ORDER BY id",
-        (manager_id,),
+        f"SELECT {EMPLOYEE_FULL_COLUMNS} FROM employees WHERE department_id = %s ORDER BY id",
+        (department_id,),
         fetchall=True,
     )
 
@@ -134,8 +160,8 @@ def create_employee(data, hashed_password):
         f"""
         INSERT INTO employees
             (first_name, last_name, email, phone, job_title, department_id,
-             manager_id, bio, hashed_password, role, is_active)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             manager_id, bio, hashed_password, role, is_active, skills, location)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING {EMPLOYEE_FULL_COLUMNS}
         """,
         (
@@ -148,8 +174,10 @@ def create_employee(data, hashed_password):
             data.get("manager_id"),
             data.get("bio"),
             hashed_password,
-            data.get("role", "employee"),
+            data.get("role", "EMPLOYEE"),
             data.get("is_active", True),
+            data.get("skills") or [],
+            data.get("location"),
         ),
         fetchone=True,
     )
@@ -195,6 +223,71 @@ def bump_token_version(employee_id):
     return _execute(
         "UPDATE employees SET token_version = token_version + 1 WHERE id = %s",
         (employee_id,),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Change requests
+# ---------------------------------------------------------------------------
+
+CHANGE_REQUEST_COLUMNS = (
+    "id, employee_id, field_name, requested_value, status, "
+    "created_at, reviewed_by, reviewed_at"
+)
+
+
+def create_change_request(employee_id, field_name, requested_value):
+    return _execute(
+        f"""
+        INSERT INTO change_requests (employee_id, field_name, requested_value)
+        VALUES (%s, %s, %s)
+        RETURNING {CHANGE_REQUEST_COLUMNS}
+        """,
+        (employee_id, field_name, requested_value),
+        fetchone=True,
+    )
+
+
+def get_change_request_by_id(request_id):
+    return _execute(
+        f"SELECT {CHANGE_REQUEST_COLUMNS} FROM change_requests WHERE id = %s",
+        (request_id,),
+        fetchone=True,
+    )
+
+
+def list_pending_change_requests():
+    return _execute(
+        f"SELECT {CHANGE_REQUEST_COLUMNS} FROM change_requests WHERE status = 'pending' ORDER BY created_at",
+        fetchall=True,
+    )
+
+
+def list_pending_change_requests_by_department(department_id):
+    return _execute(
+        f"""
+        SELECT cr.id, cr.employee_id, cr.field_name, cr.requested_value, cr.status,
+               cr.created_at, cr.reviewed_by, cr.reviewed_at
+        FROM change_requests cr
+        JOIN employees e ON e.id = cr.employee_id
+        WHERE cr.status = 'pending' AND e.department_id = %s
+        ORDER BY cr.created_at
+        """,
+        (department_id,),
+        fetchall=True,
+    )
+
+
+def update_change_request(request_id, status, reviewed_by):
+    return _execute(
+        f"""
+        UPDATE change_requests
+        SET status = %s, reviewed_by = %s, reviewed_at = now()
+        WHERE id = %s
+        RETURNING {CHANGE_REQUEST_COLUMNS}
+        """,
+        (status, reviewed_by, request_id),
+        fetchone=True,
     )
 
 

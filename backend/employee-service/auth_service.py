@@ -52,12 +52,17 @@ def verify_password(plain_password, hashed_password):
 # JWT creation
 # ---------------------------------------------------------------------------
 
-def create_access_token(employee_id, role, token_version):
-    """Builds a signed JWT for an authenticated employee."""
+def create_access_token(employee_id, role, department_id, token_version):
+    """Builds a signed JWT for an authenticated employee.
+
+    department_id is None for CEOs (they aren't scoped to a single
+    department) and set for MANAGER/EMPLOYEE accounts.
+    """
     expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
     payload = {
         "sub": str(employee_id),
         "role": role,
+        "department_id": department_id,
         "token_version": token_version,
         "exp": expire,
     }
@@ -82,17 +87,15 @@ def _get_auth_header(event):
 
 def get_current_user(event):
     """
-    Extracts and validates the JWT from the Authorization header of a Lambda
-    event, then re-checks the referenced employee against the database.
-
+    reads the tokens and determines what role the user is
     Returns:
-        dict: {"id": int, "role": str}
+        dict: {"id": int, "role": str, "department_id": int | None}
 
     Raises:
         AuthError: 401 if the header/token is missing, malformed, expired,
                    or points to a token_version/active state that no longer
-                   matches the database (e.g. after a role change or
-                   deactivation).
+                   matches the database (e.g. after a role or department
+                   change).
     """
     auth_header = _get_auth_header(event)
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -114,19 +117,26 @@ def get_current_user(event):
 
     token_version = payload.get("token_version")
     role = payload.get("role")
+    # department_id is legitimately None for CEOs, so only role/token_version
+    # (never absent for a real token) are checked for presence here.
+    department_id = payload.get("department_id")
     if token_version is None or role is None:
         raise AuthError("Malformed token payload")
 
     # Re-check against the database so a deactivated account, a changed
-    # role, or an explicit logout-everywhere (token_version bump) is
-    # enforced immediately instead of waiting for the token to expire.
+    # role/department, or an explicit logout-everywhere (token_version bump)
+    # is enforced immediately instead of waiting for the token to expire.
     current = db.get_employee_auth_state(employee_id)
     if current is None or not current["is_active"]:
         raise AuthError("Account is inactive or no longer exists")
-    if current["token_version"] != token_version or current["role"] != role:
+    if (
+        current["token_version"] != token_version
+        or current["role"] != role
+        or current["department_id"] != department_id
+    ):
         raise AuthError("Token is no longer valid, please log in again")
 
-    return {"id": employee_id, "role": role}
+    return {"id": employee_id, "role": role, "department_id": department_id}
 
 
 def require_role(user, allowed_roles):
