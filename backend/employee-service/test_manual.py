@@ -21,7 +21,7 @@ from function import handler
 
 ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_ID = "robert.chen@acme.com", "adminpass123", 1
 BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD, BANKING_MANAGER_ID = "sarah.johnson@acme.com", "managerpass123", 3
-TECH_MANAGER_EMAIL, TECH_MANAGER_PASSWORD = "emily.davis@acme.com", "managerpass123"
+TECH_MANAGER_EMAIL, TECH_MANAGER_PASSWORD, TECH_MANAGER_ID = "emily.davis@acme.com", "managerpass123", 4
 BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD, BANKING_EMPLOYEE_ID = "carol.white@acme.com", "employeepass123", 7
 TECH_EMPLOYEE_EMAIL, TECH_EMPLOYEE_PASSWORD, TECH_EMPLOYEE_ID = "steven.lewis@acme.com", "employeepass123", 11
 
@@ -125,6 +125,14 @@ def test_manager_can_edit_direct_report_contact_fields():
         body={"phone": "555-3000", "email": "carol.white@acme.com", "is_active": True},
     )
     return status == 200
+
+
+def test_manager_can_edit_own_phone_directly():
+    """Unlike an Employee, a Manager can edit their own phone straight
+    through PUT /employees/:id - no change-request/approval needed."""
+    token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
+    status, body = call("PUT", f"/employees/{BANKING_MANAGER_ID}", token=token, body={"phone": "212-555-8000"})
+    return status == 200 and body.get("phone") == "212-555-8000"
 
 
 def test_manager_cannot_edit_job_title_of_direct_report():
@@ -367,6 +375,51 @@ def test_manager_approving_change_request_updates_phone():
     return updated_employee.get("phone") == "555-2000"
 
 
+def test_manager_change_request_list_scoped_to_direct_reports():
+    """Sarah manages Carol (Banking) but not Steven (Tech, reports to
+    Emily) - Sarah's pending-requests list should include Carol's request
+    and never Steven's, even though older code scoped this by department."""
+    carol_token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
+    _, carol_request = call(
+        "POST", "/change-requests", token=carol_token, body={"field": "phone", "value": "212-555-7001"},
+    )
+
+    steven_token = login(TECH_EMPLOYEE_EMAIL, TECH_EMPLOYEE_PASSWORD)
+    _, steven_request = call(
+        "POST", "/change-requests", token=steven_token, body={"field": "phone", "value": "813-555-7002"},
+    )
+
+    manager_token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
+    status, requests = call("GET", "/change-requests", token=manager_token)
+    request_ids = {r["id"] for r in requests}
+
+    # Clean up Steven's leftover pending request so it doesn't linger for
+    # other tests/manual poking around - Emily is the one who can act on it.
+    call("PUT", f"/change-requests/{steven_request['id']}", token=login(TECH_MANAGER_EMAIL, TECH_MANAGER_PASSWORD), body={"status": "rejected"})
+
+    return status == 200 and carol_request["id"] in request_ids and steven_request["id"] not in request_ids
+
+
+def test_manager_cannot_approve_unrelated_employees_request():
+    """Even with a valid request id in hand, an unrelated manager can't
+    approve/reject it - this isn't just a UI-hidden list, it's enforced on
+    the PUT itself."""
+    carol_token = login(BANKING_EMPLOYEE_EMAIL, BANKING_EMPLOYEE_PASSWORD)
+    _, created = call(
+        "POST", "/change-requests", token=carol_token, body={"field": "phone", "value": "212-555-7003"},
+    )
+
+    tech_manager_token = login(TECH_MANAGER_EMAIL, TECH_MANAGER_PASSWORD)
+    status, _ = call(
+        "PUT", f"/change-requests/{created['id']}", token=tech_manager_token, body={"status": "approved"},
+    )
+
+    # Clean up with the actual manager so the request doesn't stay pending.
+    call("PUT", f"/change-requests/{created['id']}", token=login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD), body={"status": "rejected"})
+
+    return status == 403
+
+
 def test_manager_rejecting_change_request_leaves_employee_unchanged():
     manager_token = login(BANKING_MANAGER_EMAIL, BANKING_MANAGER_PASSWORD)
     _, before = call("GET", f"/employees/{BANKING_EMPLOYEE_ID}", token=manager_token)
@@ -399,6 +452,7 @@ TESTS = (
     test_manager_can_view_employee_in_other_department,
     test_manager_can_view_own_department_employee,
     test_manager_can_edit_direct_report_contact_fields,
+    test_manager_can_edit_own_phone_directly,
     test_manager_cannot_edit_job_title_of_direct_report,
     test_manager_cannot_reassign_department,
     test_employee_cannot_edit_another_employee,
@@ -420,6 +474,8 @@ TESTS = (
     test_employee_can_submit_change_request,
     test_employee_cannot_view_change_requests,
     test_manager_approving_change_request_updates_phone,
+    test_manager_change_request_list_scoped_to_direct_reports,
+    test_manager_cannot_approve_unrelated_employees_request,
     test_manager_rejecting_change_request_leaves_employee_unchanged,
 )
 

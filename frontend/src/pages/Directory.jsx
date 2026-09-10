@@ -34,6 +34,7 @@ function Directory() {
   const [loadError, setLoadError] = useState(null)
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
   const [skillFilter, setSkillFilter] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
   const [locationFilter, setLocationFilter] = useState('')
@@ -78,6 +79,7 @@ function Directory() {
 
   const filtered = employees.filter((e) => {
     if (searchQuery && !`${e.first_name} ${e.last_name}`.toLowerCase().includes(searchQuery.trim().toLowerCase())) return false
+    if (roleFilter && e.role !== roleFilter) return false
     if (deptFilter && String(e.department_id) !== deptFilter) return false
     if (locationFilter && e.location !== locationFilter) return false
     if (skillFilter && !(e.skills || []).includes(skillFilter)) return false
@@ -185,6 +187,15 @@ function Directory() {
       />
 
       <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+        <FormControl size="small" sx={{ width: { xs: '100%', sm: 180 } }}>
+          <InputLabel id="role-filter-label">Role</InputLabel>
+          <Select labelId="role-filter-label" value={roleFilter} label="Role" input={<OutlinedInput label="Role" />} onChange={(e) => setRoleFilter(e.target.value)}>
+            <MenuItem value="">All Roles</MenuItem>
+            <MenuItem value="ADMIN">Admin</MenuItem>
+            <MenuItem value="MANAGER">Manager</MenuItem>
+            <MenuItem value="EMPLOYEE">Employee</MenuItem>
+          </Select>
+        </FormControl>
         <FormControl size="small" sx={{ width: { xs: '100%', sm: 180 } }}>
           <InputLabel id="skill-filter-label">Skill</InputLabel>
           <Select labelId="skill-filter-label" value={skillFilter} label="Skill" input={<OutlinedInput label="Skill" />} onChange={(e) => setSkillFilter(e.target.value)}>

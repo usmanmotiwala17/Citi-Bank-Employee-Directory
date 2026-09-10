@@ -104,16 +104,21 @@ def update_employee_route(event, user, employee_id):
         }
     elif user["id"] == target["id"]:
         # Self-service: everyone can edit their own skills/availability,
-        # regardless of role. manager_notes is deliberately excluded - an
-        # employee can never write (or even see) their own manager_notes.
+        # regardless of role. A MANAGER additionally gets to edit their own
+        # phone directly, no change-request needed - only for their own
+        # record, not anyone else's (that's the elif below). manager_notes
+        # is deliberately excluded for everyone here - nobody can write (or
+        # even see) their own manager_notes, self-editing or not.
         allowed_fields = {"skills", "availability_status"}
+        if user["role"] == "MANAGER":
+            allowed_fields.add("phone")
     elif _is_direct_manager(user, target):
         # A MANAGER can only touch phone/email/is_active, and only for
         # employees whose manager_id is literally them - not "anyone in my
         # department" (that broader _can_manage rule still gates
-        # deactivation and change-request approval, but not this). If they
-        # don't directly manage this person, they fall through to the 403
-        # below with no fields at all, not even these three.
+        # deactivation, the one remaining place still scoped by department).
+        # If they don't directly manage this person, they fall through to
+        # the 403 below with no fields at all, not even these three.
         # manager_notes is included too - it's a distinct field with its own
         # always-on "direct manager" gate (see _can_view_manager_notes),
         # unaffected by this rule.

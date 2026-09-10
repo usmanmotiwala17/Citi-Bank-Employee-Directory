@@ -96,6 +96,7 @@ function Profile() {
   }
 
   const isAdmin = employee.role === 'ADMIN'
+  const isManager = employee.role === 'MANAGER'
   const departmentName = departments.find((d) => d.id === employee.department_id)?.name
   const canSeeManagerNotes = !isSelf && 'manager_notes' in employee
 
@@ -126,6 +127,12 @@ function Profile() {
         body.job_title = editDraft.job_title
         body.location = editDraft.location
         body.bio = editDraft.bio
+      } else if (isManager) {
+        // Managers can edit their own phone directly - no change-request
+        // needed, unlike a plain Employee. Only for their own record; see
+        // canEditAsDirectManager for the (narrower) rule on editing someone
+        // else's phone.
+        body.phone = editDraft.phone
       }
       const updated = await updateEmployee(token, employee.id, body)
       setEmployee(updated)
@@ -252,14 +259,32 @@ function Profile() {
             <Stack spacing={2}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                 <PhoneIcon sx={{ color: CITI_BLUE }} />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>{employee.phone || 'Not provided'}</Typography>
-                {isSelf && !isAdmin && (
+                {employee.phone ? (
+                  <Typography
+                    component="a"
+                    href={`tel:${employee.phone}`}
+                    variant="h6"
+                    sx={{ fontWeight: 600, color: 'inherit', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+                  >
+                    {employee.phone}
+                  </Typography>
+                ) : (
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: 'text.secondary' }}>Not provided</Typography>
+                )}
+                {isSelf && !isAdmin && !isManager && (
                   <Button size="small" onClick={() => setPhoneDialogOpen(true)}>Request Change</Button>
                 )}
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                 <EmailIcon sx={{ color: CITI_BLUE }} />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>{employee.email}</Typography>
+                <Typography
+                  component="a"
+                  href={`mailto:${employee.email}`}
+                  variant="h6"
+                  sx={{ fontWeight: 600, color: 'inherit', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } }}
+                >
+                  {employee.email}
+                </Typography>
               </Box>
             </Stack>
           </Paper>
@@ -427,6 +452,11 @@ function Profile() {
                       <TextField fullWidth label="Bio" multiline minRows={2} value={editDraft.bio} onChange={(e) => setEditDraft({ ...editDraft, bio: e.target.value })} />
                     </Grid>
                   </>
+                )}
+                {isManager && (
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField fullWidth label="Phone" value={editDraft.phone} onChange={(e) => setEditDraft({ ...editDraft, phone: e.target.value })} />
+                  </Grid>
                 )}
                 <Grid size={{ xs: 12 }}>
                   <Button variant="contained" disabled={savingEdit} onClick={handleSaveEdit} sx={{ bgcolor: CITI_BLUE, '&:hover': { bgcolor: CITI_BLUE_DARK } }}>

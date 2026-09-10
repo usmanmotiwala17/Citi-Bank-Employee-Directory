@@ -13,6 +13,8 @@ Usage:
     python3 seed_data.py
 """
 
+import os
+
 from psycopg.errors import UniqueViolation
 
 import auth_service as auth
@@ -62,27 +64,33 @@ SKILLS_BY_JOB_TITLE = {
 # existing (their manager_id has to point at a real row) - so managers must
 # be created before employees. One shared password per role tier keeps this
 # easy to demo/log in with.
-
-ADMIN_PASSWORD = "adminpass123"
-MANAGER_PASSWORD = "managerpass123"
-EMPLOYEE_PASSWORD = "employeepass123"
+#
+# Read from the environment rather than hardcoded, since this repo is
+# public - the fallback values below are placeholder/demo values only,
+# fine for a throwaway local seed, NOT real secrets. Never rely on them
+# for a database anyone else can reach; set the SEED_*_PASSWORD env vars
+# instead (see .env.sample).
+ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "adminpass123")
+MANAGER_PASSWORD = os.getenv("SEED_MANAGER_PASSWORD", "managerpass123")
+EMPLOYEE_PASSWORD = os.getenv("SEED_EMPLOYEE_PASSWORD", "employeepass123")
 
 ADMINS = [
     {"first_name": "Robert", "last_name": "Chen", "email": "robert.chen@acme.com",
-     "job_title": "Chief Executive Officer", "password": ADMIN_PASSWORD},
+     "job_title": "Chief Executive Officer", "password": ADMIN_PASSWORD,
+     "phone": "212-555-0101"},
 ]
 
 # Exactly one manager per department.
 MANAGERS = [
     {"first_name": "Sarah", "last_name": "Johnson", "email": "sarah.johnson@acme.com",
      "department": "Banking & Finance", "job_title": "Banking & Finance Manager",
-     "password": MANAGER_PASSWORD},
+     "password": MANAGER_PASSWORD, "phone": "212-555-0110"},
     {"first_name": "Emily", "last_name": "Davis", "email": "emily.davis@acme.com",
      "department": "Technology & Operations", "job_title": "Technology & Operations Manager",
-     "password": MANAGER_PASSWORD},
+     "password": MANAGER_PASSWORD, "phone": "813-555-0120"},
     {"first_name": "Patricia", "last_name": "Garcia", "email": "patricia.garcia@acme.com",
      "department": "HR", "job_title": "HR Manager",
-     "password": MANAGER_PASSWORD},
+     "password": MANAGER_PASSWORD, "phone": "904-555-0130"},
 ]
 
 # Each employee's manager_id gets filled in automatically at seed time from
@@ -91,44 +99,70 @@ MANAGERS = [
 EMPLOYEES = [
     # -- Banking & Finance (reports to Sarah Johnson) ------------------------
     {"first_name": "Michael", "last_name": "Brown", "email": "michael.brown@acme.com",
-     "department": "Banking & Finance", "job_title": "Financial Analyst", "password": EMPLOYEE_PASSWORD},
+     "department": "Banking & Finance", "job_title": "Financial Analyst", "password": EMPLOYEE_PASSWORD,
+     "phone": "212-555-0111"},
     {"first_name": "Carol", "last_name": "White", "email": "carol.white@acme.com",
      "department": "Banking & Finance", "job_title": "Loan Officer", "password": EMPLOYEE_PASSWORD,
+     "phone": "212-555-0112",
      "manager_notes": "Consistently exceeds loan processing targets. Strong candidate for a "
                        "senior loan officer track - raise it at her next review."},
     {"first_name": "Kevin", "last_name": "Lee", "email": "kevin.lee@acme.com",
      "department": "Banking & Finance", "job_title": "Financial Analyst", "password": EMPLOYEE_PASSWORD,
+     "phone": "212-555-0113",
      "manager_notes": "Newer to the team - onboarding is going well but still ramping up on "
                        "the risk models. Pair with Nancy Clark for the Q3 close."},
     {"first_name": "Nancy", "last_name": "Clark", "email": "nancy.clark@acme.com",
-     "department": "Banking & Finance", "job_title": "Risk Analyst", "password": EMPLOYEE_PASSWORD},
+     "department": "Banking & Finance", "job_title": "Risk Analyst", "password": EMPLOYEE_PASSWORD,
+     "phone": "212-555-0114"},
 
     # -- Technology & Operations (reports to Emily Davis) --------------------
     {"first_name": "James", "last_name": "Wilson", "email": "james.wilson@acme.com",
      "department": "Technology & Operations", "job_title": "Software Engineer", "password": EMPLOYEE_PASSWORD,
+     "phone": "813-555-0121",
      "manager_notes": "Great technical depth but stays quiet in sprint planning. Encourage "
                        "him to lead a small project next quarter to build his visibility."},
     {"first_name": "Steven", "last_name": "Lewis", "email": "steven.lewis@acme.com",
-     "department": "Technology & Operations", "job_title": "IT Support Specialist", "password": EMPLOYEE_PASSWORD},
+     "department": "Technology & Operations", "job_title": "IT Support Specialist", "password": EMPLOYEE_PASSWORD,
+     "phone": "813-555-0122"},
     {"first_name": "Angela", "last_name": "Walker", "email": "angela.walker@acme.com",
-     "department": "Technology & Operations", "job_title": "Software Engineer", "password": EMPLOYEE_PASSWORD},
+     "department": "Technology & Operations", "job_title": "Software Engineer", "password": EMPLOYEE_PASSWORD,
+     "phone": "813-555-0123"},
     {"first_name": "Brian", "last_name": "Hall", "email": "brian.hall@acme.com",
-     "department": "Technology & Operations", "job_title": "IT Support Specialist", "password": EMPLOYEE_PASSWORD},
+     "department": "Technology & Operations", "job_title": "IT Support Specialist", "password": EMPLOYEE_PASSWORD,
+     "phone": "813-555-0124"},
     {"first_name": "Karen", "last_name": "Young", "email": "karen.young@acme.com",
-     "department": "Technology & Operations", "job_title": "Business Operations Analyst", "password": EMPLOYEE_PASSWORD},
+     "department": "Technology & Operations", "job_title": "Business Operations Analyst", "password": EMPLOYEE_PASSWORD,
+     "phone": "813-555-0125"},
 
     # -- HR (reports to Patricia Garcia) --------------------------------------
     {"first_name": "David", "last_name": "Rodriguez", "email": "david.rodriguez@acme.com",
-     "department": "HR", "job_title": "HR Coordinator", "password": EMPLOYEE_PASSWORD},
+     "department": "HR", "job_title": "HR Coordinator", "password": EMPLOYEE_PASSWORD,
+     "phone": "904-555-0131"},
     {"first_name": "Jason", "last_name": "King", "email": "jason.king@acme.com",
-     "department": "HR", "job_title": "Recruiter", "password": EMPLOYEE_PASSWORD},
+     "department": "HR", "job_title": "Recruiter", "password": EMPLOYEE_PASSWORD,
+     "phone": "904-555-0132"},
     {"first_name": "Michelle", "last_name": "Scott", "email": "michelle.scott@acme.com",
      "department": "HR", "job_title": "HR Coordinator", "password": EMPLOYEE_PASSWORD,
+     "phone": "904-555-0133",
      "manager_notes": "Reliable and detail-oriented. Follow up on the recruiting-rotation "
                        "interest she raised in her last 1:1."},
     {"first_name": "Daniel", "last_name": "Adams", "email": "daniel.adams@acme.com",
-     "department": "HR", "job_title": "Recruiter", "password": EMPLOYEE_PASSWORD},
+     "department": "HR", "job_title": "Recruiter", "password": EMPLOYEE_PASSWORD,
+     "phone": "904-555-0134"},
 ]
+
+
+def _backfill_fields(existing_row, person, fields):
+    """For someone who already exists (from a previous seed run), fills in
+    any of `fields` that are present in `person` but still empty/null on the
+    existing row - so re-running the script keeps picking up new sample data
+    (phone numbers, manager_notes, etc.) without needing a fresh database.
+    Returns True if anything was actually updated."""
+    updates = {name: person[name] for name in fields if person.get(name) and not existing_row.get(name)}
+    if updates:
+        db.update_employee(existing_row["id"], updates)
+        print(f"  backfilled {', '.join(updates)}: {person['email']}")
+    return bool(updates)
 
 
 def seed_departments():
@@ -149,17 +183,20 @@ def seed_departments():
 
 
 def seed_admins():
-    existing_emails = {row["email"] for row in db.list_employees()}
+    existing_by_email = {row["email"]: row for row in db.list_employees()}
 
     for person in ADMINS:
-        if person["email"] in existing_emails:
-            print(f"  skipping (already exists): {person['email']}")
+        existing = existing_by_email.get(person["email"])
+        if existing is not None:
+            if not _backfill_fields(existing, person, ("phone",)):
+                print(f"  skipping (already exists): {person['email']}")
             continue
 
         data = {
             "first_name": person["first_name"],
             "last_name": person["last_name"],
             "email": person["email"],
+            "phone": person.get("phone"),
             "job_title": person["job_title"],
             "department_id": None,
             "manager_id": None,
@@ -175,17 +212,20 @@ def seed_admins():
 
 
 def seed_managers(department_ids_by_name):
-    existing_emails = {row["email"] for row in db.list_employees()}
+    existing_by_email = {row["email"]: row for row in db.list_employees()}
 
     for person in MANAGERS:
-        if person["email"] in existing_emails:
-            print(f"  skipping (already exists): {person['email']}")
+        existing = existing_by_email.get(person["email"])
+        if existing is not None:
+            if not _backfill_fields(existing, person, ("phone",)):
+                print(f"  skipping (already exists): {person['email']}")
             continue
 
         data = {
             "first_name": person["first_name"],
             "last_name": person["last_name"],
             "email": person["email"],
+            "phone": person.get("phone"),
             "job_title": person["job_title"],
             "department_id": department_ids_by_name[person["department"]],
             "manager_id": None,
@@ -222,15 +262,7 @@ def seed_employees(department_ids_by_name, manager_ids_by_department):
     for person in EMPLOYEES:
         existing = existing_by_email.get(person["email"])
         if existing is not None:
-            # Already seeded from a previous run - just backfill manager_notes
-            # if this person has sample notes that haven't been set yet, so
-            # re-running the script still populates new demo data on a
-            # database that was seeded before manager_notes existed.
-            notes = person.get("manager_notes")
-            if notes and not existing.get("manager_notes"):
-                db.update_employee(existing["id"], {"manager_notes": notes})
-                print(f"  backfilled manager_notes: {person['email']}")
-            else:
+            if not _backfill_fields(existing, person, ("phone", "manager_notes")):
                 print(f"  skipping (already exists): {person['email']}")
             continue
 
@@ -238,6 +270,7 @@ def seed_employees(department_ids_by_name, manager_ids_by_department):
             "first_name": person["first_name"],
             "last_name": person["last_name"],
             "email": person["email"],
+            "phone": person.get("phone"),
             "job_title": person["job_title"],
             "department_id": department_ids_by_name[person["department"]],
             "manager_id": manager_ids_by_department[person["department"]],

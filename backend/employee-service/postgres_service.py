@@ -278,17 +278,20 @@ def list_pending_change_requests():
     )
 
 
-def list_pending_change_requests_by_department(department_id):
+def list_pending_change_requests_by_manager(manager_id):
+    """Scoped by manager_id (who this employee actually reports to), not
+    department - a manager should only see requests from their own direct
+    reports, not everyone in their department."""
     return _execute(
         f"""
         SELECT cr.id, cr.employee_id, cr.field_name, cr.requested_value, cr.status,
                cr.created_at, cr.reviewed_by, cr.reviewed_at
         FROM change_requests cr
         JOIN employees e ON e.id = cr.employee_id
-        WHERE cr.status = 'pending' AND e.department_id = %s
+        WHERE cr.status = 'pending' AND e.manager_id = %s
         ORDER BY cr.created_at
         """,
-        (department_id,),
+        (manager_id,),
         fetchall=True,
     )
 

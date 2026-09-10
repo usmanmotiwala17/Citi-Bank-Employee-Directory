@@ -10,7 +10,7 @@ employee row.
 import auth_service as auth
 import postgres_service as db
 from auth_service import AuthError
-from permissions import _can_manage
+from permissions import _is_direct_manager
 from serializers import serialize_change_request
 from web import NotFoundError, ValidationError, parse_body, response
 
@@ -36,7 +36,9 @@ def list_change_requests_route(event, user):
     if user["role"] == "ADMIN":
         rows = db.list_pending_change_requests()
     else:
-        rows = db.list_pending_change_requests_by_department(user["department_id"])
+        # Scoped to direct reports (manager_id == this manager), not
+        # "anyone in my department" - see list_pending_change_requests_by_manager.
+        rows = db.list_pending_change_requests_by_manager(user["id"])
 
     results = []
     for row in rows:
@@ -53,7 +55,10 @@ def update_change_request_route(event, user, request_id):
     target = db.get_employee_by_id(request_row["employee_id"])
     if target is None:
         raise NotFoundError("Employee not found")
-    if not _can_manage(user, target):
+    # Matches list_change_requests_route's scoping: Admin can review anyone's,
+    # a Manager only their own direct reports' - not just enforced by what's
+    # visible in their list, in case a request id is guessed/reused.
+    if not (user["role"] == "ADMIN" or _is_direct_manager(user, target)):
         raise AuthError("Not permitted to review this change request", status_code=403)
     if request_row["status"] != "pending":
         raise ValidationError("This change request has already been reviewed")
