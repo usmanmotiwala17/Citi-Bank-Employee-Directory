@@ -4,6 +4,7 @@ import {
   Box, Typography, Grid, Card, CardContent, Chip, Select, MenuItem,
   InputLabel, FormControl, OutlinedInput, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, Alert, Divider, InputAdornment, Paper,
+  Pagination,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import SearchIcon from '@mui/icons-material/Search'
@@ -20,6 +21,8 @@ const EMPTY_CREATE_FORM = {
   first_name: '', last_name: '', email: '', password: '',
   role: 'EMPLOYEE', department_id: '', manager_id: '', skills: '', location: '',
 }
+
+const PAGE_SIZE = 50
 
 function parseSkills(text) {
   return text.split(',').map((s) => s.trim()).filter(Boolean)
@@ -39,6 +42,7 @@ function Directory() {
   const [deptFilter, setDeptFilter] = useState('')
   const [locationFilter, setLocationFilter] = useState('')
   const [availabilityFilter, setAvailabilityFilter] = useState('')
+  const [page, setPage] = useState(1)
 
   const [addEmployeeOpen, setAddEmployeeOpen] = useState(false)
   const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM)
@@ -62,6 +66,12 @@ function Directory() {
   useEffect(() => {
     loadAll()
   }, [loadAll])
+
+  // Any search/filter change narrows the result set, so whatever page you
+  // were on may no longer make sense - always jump back to page 1.
+  useEffect(() => {
+    setPage(1)
+  }, [searchQuery, roleFilter, skillFilter, deptFilter, locationFilter, availabilityFilter])
 
   const departmentName = (id) => departments.find((d) => d.id === id)?.name || '—'
 
@@ -87,9 +97,20 @@ function Directory() {
     return true
   })
 
-  const admins = filtered.filter((e) => e.role === 'ADMIN')
-  const managers = filtered.filter((e) => e.role === 'MANAGER')
-  const staff = filtered.filter((e) => e.role === 'EMPLOYEE')
+  // Alphabetical by name - no existing sort convention for people elsewhere
+  // in the app, so first name (then last name as a tiebreaker) is the
+  // reasonable default.
+  const sortedFiltered = [...filtered].sort(
+    (a, b) => a.first_name.localeCompare(b.first_name) || a.last_name.localeCompare(b.last_name),
+  )
+
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pageItems = sortedFiltered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+
+  const admins = pageItems.filter((e) => e.role === 'ADMIN')
+  const managers = pageItems.filter((e) => e.role === 'MANAGER')
+  const staff = pageItems.filter((e) => e.role === 'EMPLOYEE')
 
   // Company-wide totals - unaffected by search/filters, so this stays a
   // stable "at a glance" summary while the cards below get filtered down.
@@ -227,9 +248,32 @@ function Directory() {
         </FormControl>
       </Box>
 
-      <DirectorySection title="Admin" people={admins} departmentName={departmentName} onOpenProfile={(id) => navigate(`/employees/${id}`)} />
-      <DirectorySection title="Managers" people={managers} departmentName={departmentName} onOpenProfile={(id) => navigate(`/employees/${id}`)} />
-      <DirectorySection title="Employees" people={staff} departmentName={departmentName} onOpenProfile={(id) => navigate(`/employees/${id}`)} />
+      {sortedFiltered.length === 0 ? (
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>No employees match your filters.</Typography>
+      ) : (
+        <>
+          {admins.length > 0 && (
+            <DirectorySection title="Admin" people={admins} departmentName={departmentName} onOpenProfile={(id) => navigate(`/employees/${id}`)} />
+          )}
+          {managers.length > 0 && (
+            <DirectorySection title="Managers" people={managers} departmentName={departmentName} onOpenProfile={(id) => navigate(`/employees/${id}`)} />
+          )}
+          {staff.length > 0 && (
+            <DirectorySection title="Employees" people={staff} departmentName={departmentName} onOpenProfile={(id) => navigate(`/employees/${id}`)} />
+          )}
+        </>
+      )}
+
+      {totalPages > 1 && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+          <Pagination
+            count={totalPages}
+            page={currentPage}
+            onChange={(e, value) => setPage(value)}
+            color="primary"
+          />
+        </Box>
+      )}
 
       {/* Add Employee dialog (Admin only) */}
       <Dialog open={addEmployeeOpen} onClose={() => setAddEmployeeOpen(false)} maxWidth="sm" fullWidth>
@@ -310,33 +354,30 @@ function DirectorySection({ title, people, departmentName, onOpenProfile }) {
     <Box sx={{ mb: 4 }}>
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>{title}</Typography>
       <Divider sx={{ mb: 2 }} />
-      {people.length === 0 ? (
-        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>No matching employees.</Typography>
-      ) : (
-        <Grid container spacing={2}>
-          {people.map((emp) => (
-            <Grid key={emp.id} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-              <Card variant="outlined" sx={{ height: '100%' }}>
-                <CardContent
-                  onClick={() => onOpenProfile(emp.id)}
-                  sx={{ textAlign: 'center', cursor: 'pointer' }}
-                >
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
-                    <EmployeeAvatar employee={emp} size={64} />
-                  </Box>
-                  <Typography sx={{ fontWeight: 700 }}>{emp.first_name} {emp.last_name}</Typography>
-                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>{emp.job_title || roleLabel(emp.role)}</Typography>
-                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>{departmentName(emp.department_id)}</Typography>
-                  <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
-                    <AvailabilityIndicator status={emp.availability_status} />
-                  </Box>
-                  {!emp.is_active && <Chip size="small" label="Inactive" sx={{ mt: 0.5 }} />}
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      )}
+      <Grid container spacing={2}>
+        {people.map((emp) => (
+          <Grid key={emp.id} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+            <Card variant="outlined" sx={{ height: '100%' }}>
+              <CardContent
+                onClick={() => onOpenProfile(emp.id)}
+                sx={{ textAlign: 'center', cursor: 'pointer' }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+                  <EmployeeAvatar employee={emp} size={64} />
+                </Box>
+                <Typography sx={{ fontWeight: 700 }}>{emp.first_name} {emp.last_name}</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>{emp.job_title || roleLabel(emp.role)}</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>{departmentName(emp.department_id)}</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>{emp.location || '—'}</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+                  <AvailabilityIndicator status={emp.availability_status} />
+                </Box>
+                {!emp.is_active && <Chip size="small" label="Inactive" sx={{ mt: 0.5 }} />}
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
     </Box>
   )
 }
