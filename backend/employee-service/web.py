@@ -4,6 +4,7 @@ response, parsing the request body, and the two error types route handlers
 raise for 400/404s (auth's 401/403 is AuthError, over in auth_service.py).
 """
 
+import base64
 import json
 
 
@@ -27,6 +28,11 @@ def parse_body(event):
     raw = event.get("body")
     if not raw:
         return {}
+    if event.get("isBase64Encoded"):
+        # Lambda Function URLs (payload format 2.0) base64-encode the body
+        # in some cases - local_server.py/test_manual.py never set this
+        # flag, so this is a no-op for those.
+        raw = base64.b64decode(raw).decode("utf-8")
     try:
         parsed = json.loads(raw)
     except (TypeError, ValueError):

@@ -56,8 +56,46 @@ def _ensure_schema(conn):
     """
     There's no separate migration tool for this project - schema changes are
     applied as idempotent DDL here, run once per new pooled connection.
+
+    The base `departments`/`employees` tables below were previously missing
+    entirely from this function - they happened to already exist on local
+    dev databases (set up manually at some earlier point, outside any code
+    in this repo), so this always worked locally but left a fresh database
+    (e.g. a newly-provisioned Aurora cluster) with no schema at all. Adding
+    them here, `IF NOT EXISTS`, makes this function fully self-sufficient:
+    a no-op against a database that already has them, a real bootstrap
+    against one that doesn't.
     """
     with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS departments (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employees (
+                id SERIAL PRIMARY KEY,
+                first_name TEXT NOT NULL,
+                last_name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                phone TEXT,
+                job_title TEXT,
+                department_id INTEGER REFERENCES departments(id),
+                manager_id INTEGER REFERENCES employees(id),
+                bio TEXT,
+                hashed_password TEXT NOT NULL,
+                role TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                token_version INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
         cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS skills TEXT[] NOT NULL DEFAULT '{}'")
         cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS location TEXT")
         cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS manager_notes TEXT")

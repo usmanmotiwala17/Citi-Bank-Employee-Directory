@@ -39,6 +39,13 @@ from directory_routes import directory_tree_route
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# CloudFront routes /api/employee-service/* to this Lambda's Function URL
+# without stripping the prefix first (no origin_path/rewrite is configured
+# there), so requests arriving via CloudFront carry this prefix on the path
+# while direct Function URL / local dev requests never do. Stripped below,
+# once, right after the path is extracted from the event.
+CLOUDFRONT_PATH_PREFIX = "/api/employee-service"
+
 # (method, path regex, requires_auth, handler)
 # Handlers either take (event, user) or (event, user, id) - id groups are
 # captured from the path and passed as extra positional args, in order.
@@ -65,12 +72,23 @@ def handler(event=None, context=None):
     """
     Lambda entry point. Routes the request based on httpMethod + path,
     enforces auth/permissions, and maps errors to the correct status codes.
+
+    Accepts two different event shapes for method/path, since both occur in
+    practice: the older API-Gateway-proxy-style shape with top-level
+    `httpMethod`/`path` keys (what local_server.py and test_manual.py build
+    by hand), and AWS Lambda Function URLs' actual payload format 2.0, which
+    nests them under `requestContext.http` instead and uses `rawPath` rather
+    than `path`. Real Function URL/API Gateway requests only ever send one
+    or the other, never both, so trying each in order handles both cleanly.
     """
     event = event or {}
     logger.debug("Received event: %s", event)
 
-    method = (event.get("httpMethod") or "").upper()
-    path = (event.get("path") or "").rstrip("/") or "/"
+    http_ctx = (event.get("requestContext") or {}).get("http") or {}
+    method = (event.get("httpMethod") or http_ctx.get("method") or "").upper()
+    path = (event.get("path") or event.get("rawPath") or http_ctx.get("path") or "").rstrip("/") or "/"
+    if path.startswith(CLOUDFRONT_PATH_PREFIX):
+        path = path[len(CLOUDFRONT_PATH_PREFIX):] or "/"
 
     for route_method, pattern, requires_auth, route_handler in ROUTES:
         if route_method != method:

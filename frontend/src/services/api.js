@@ -1,7 +1,19 @@
 import axios from 'axios'
 
+// In production, VITE_API_URL is the CloudFront domain and VITE_API_ENDPOINTS
+// maps each backend service to its path prefix behind that domain (e.g.
+// "/api/employee-service") - see bin/generate-env.sh. Locally, neither is
+// set, so this falls back to local_server.py's unprefixed localhost:8000.
+const API_ENDPOINTS = (() => {
+  try {
+    return JSON.parse(import.meta.env.VITE_API_ENDPOINTS || '{}')
+  } catch {
+    return {}
+  }
+})()
+
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: (import.meta.env.VITE_API_URL || 'http://localhost:8000') + (API_ENDPOINTS['employee-service'] || ''),
 })
 
 function authHeaders(token) {
